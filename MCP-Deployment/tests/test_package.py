@@ -17,7 +17,7 @@ class SourceTests(unittest.TestCase):
             ast.parse(f.read_text(), filename=str(f))
 
     def test_shell_syntax(self):
-        for f in ["install.sh", "uninstall.sh", "status.sh", "renew-share.sh"]:
+        for f in ["install.sh", "uninstall.sh", "status.sh", "renew-share.sh", "scripts/deploy_release.sh"]:
             subprocess.run(["bash", "-n", str(ROOT / f)], check=True)
 
     def test_no_runtime_credentials_bundled(self):
