@@ -41,15 +41,13 @@ PY
     echo '[FAIL] OAuth gateway is inactive' >&2
     exit 1
   fi
-  if ! curl -fsS --max-time 5 \
-    http://127.0.0.1:8081/auth/realms/master/.well-known/openid-configuration >/dev/null; then
+  if ! curl -fsS --max-time 5 http://127.0.0.1:8081/auth/realms/master/.well-known/openid-configuration >/dev/null; then
     echo '[FAIL] Keycloak admin API unreachable via localhost:8081' >&2
     exit 1
   fi
   echo '[PASS] Keycloak HTTP API'
   for service in pocmap hackbrowser zap; do
-    code="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
-      "http://127.0.0.1:8088/$service/mcp")" || {
+    code="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:8088/$service/mcp")" || {
       echo "[FAIL] $service OAuth route unreachable" >&2
       exit 1
     }
