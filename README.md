@@ -164,6 +164,52 @@ sudo grep -E '^(MCP_LOGIN_USER|MCP_LOGIN_PASSWORD|KEYCLOAK_ADMIN_PASSWORD)=' \
 
 최초 로그인 시 임시 비밀번호를 변경해야 합니다. **변경 후 실제 비밀번호는 조회할 수 없으며**, `private.env`의 `MCP_LOGIN_PASSWORD`는 최초 발급값으로 남습니다. 기존 계정의 비밀번호를 바꿔야 한다면 Keycloak에서 **재설정**하세요. 이미 설치된 서버에서 `MCP_LOGIN_USER`나 비밀번호를 파일에서만 수정하는 것은 기존 Keycloak 사용자 정보를 변경하지 않습니다.
 
+### 1-1. 추가 사용자 계정 생성
+
+기존 `mcp-operator` 계정을 삭제하거나 설치를 다시 실행할 필요는 없습니다. **Keycloak의 `security-mcp` Realm에 로그인 사용자를 추가**합니다. OAuth가 활성화된 서버에서 진행하세요. 새로운 사용자마다 OAuth Client ID를 만들 필요는 없습니다.
+
+1. 서버에서 Keycloak 관리자 비밀번호를 확인합니다. `mcpadmin`은 관리자 ID이며 **일반 MCP 로그인 ID가 아닙니다.** 비밀번호가 화면에 표시되므로 주변에 노출되지 않도록 주의하세요.
+
+   ```bash
+   sudo grep '^KEYCLOAK_ADMIN_PASSWORD=' /opt/mcp-deployment/runtime/private.env
+   ```
+
+2. Keycloak 컨테이너의 관리자 CLI를 사용합니다. 첫 번째 명령에서 관리자 비밀번호를 입력하라는 메시지가 나오면 위 비밀번호를 입력합니다.
+
+   ```bash
+   ROOT=/opt/mcp-deployment
+   # 이후 명령에서 공통으로 사용할 Docker Compose 옵션
+   DC="sudo docker compose --env-file $ROOT/runtime/private.env -f $ROOT/docker-compose.yml --profile oauth"
+   $DC exec keycloak /opt/keycloak/bin/kcadm.sh config credentials \
+     --server http://127.0.0.1:8080/auth --realm master --user mcpadmin
+   ```
+
+3. 사용자 ID를 정해 계정을 생성하고 임시 비밀번호를 지정합니다. 예시 `teamuser02`는 원하는 로그인 ID로 변경하세요.
+
+   ```bash
+   NEW_USER=teamuser02
+   $DC exec keycloak /opt/keycloak/bin/kcadm.sh create users \
+     -r security-mcp -s "username=$NEW_USER" -s enabled=true
+
+   # 임시 비밀번호를 화면과 셸 기록에 노출하지 않고 입력
+   read -r -s -p '추가 사용자 임시 비밀번호: ' NEW_PASS; echo
+   $DC exec keycloak /opt/keycloak/bin/kcadm.sh set-password \
+     -r security-mcp --username "$NEW_USER" \
+     --new-password "$NEW_PASS" --temporary
+   unset NEW_PASS
+   ```
+
+4. 계정 생성 여부를 확인합니다.
+
+   ```bash
+   $DC exec keycloak /opt/keycloak/bin/kcadm.sh get users \
+     -r security-mcp -q "username=$NEW_USER"
+   ```
+
+추가된 사용자는 기존 MCP 접속 주소에서 새 ID·임시 비밀번호로 로그인하고, **첫 로그인 시 본인 비밀번호로 변경**합니다. 계정은 Keycloak 데이터베이스에 저장되며 `runtime/private.env`에 사용자별 비밀번호가 추가되지는 않습니다. 비밀번호 분실 시 관리자가 `set-password --temporary`로 새 임시 비밀번호를 발급할 수 있지만, **기존 비밀번호를 조회할 수는 없습니다.**
+
+> **보안:** 이 구성의 추가 계정들은 동일한 HackBrowser 브라우저 세션과 ZAP 스캔 환경을 공유합니다. 계정 생성만으로 사용자별 브라우저/스캔 격리가 이루어지지 않으므로 신뢰할 수 있는 사용자에게만 발급하세요. `set-password`는 실행 중 프로세스 인자에 임시 비밀번호가 잠시 포함될 수 있으므로 다중 사용자 서버에서는 주의가 필요합니다.
+
 ### 2. 이미 설치된 서버에 외부 HTTPS 주소 적용
 
 기존 데이터를 보존하려면 **재설치 대신 환경설정만 변경**합니다. HTTPS 프록시/터널이 외부 TLS를 처리하고 서버의 `8088` 포트로 전달하는 경우 `CADDY_MODE=external`입니다. 서버의 Caddy가 직접 80/443을 받아 HTTPS 인증서까지 처리할 때만 `CADDY_MODE=public`을 사용하세요.
