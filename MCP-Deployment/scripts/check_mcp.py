@@ -29,6 +29,11 @@ def rpc(service, method, params=None, proto="2026-07-28"):
         "Mcp-Method": method,
         "MCP-Protocol-Version": proto,
     }
+    if method == "tools/call":
+        name = (params or {}).get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError("tools/call requires a non-empty tool name")
+        headers["Mcp-Name"] = name
     req = urllib.request.Request(
         f"{BASE}/{service}/mcp",
         data=json.dumps(payload).encode(), headers=headers, method="POST",
