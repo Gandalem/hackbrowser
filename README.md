@@ -59,10 +59,10 @@ PocMap · HackBrowser MCP · OWASP ZAP MCP 통합 설치 패키지 (Ubuntu/Debia
 | `browser_elements` | 페이지의 링크와 입력창·버튼 요소 정보를 수집 | `target_id`(선택), `max_items`(최대 100) |
 | `browser_click` | CSS 선택자로 찾은 페이지 요소를 클릭 | `selector`, `target_id`(선택) |
 | `browser_fill` | CSS 선택자로 입력창에 값을 지정하고 `input`/`change` 이벤트 발생 | `selector`, `value`, `target_id`(선택) |
-| `browser_screenshot` | 브라우저 화면을 PNG로 캡처해 서버 로컬 파일에 저장 | `target_id`(선택); 반환값은 서버 파일 경로 |
+| `browser_screenshot` | 브라우저 화면을 PNG로 캡처하고 MCP 클라이언트에 이미지(`image/png`)를 직접 반환하며, 서버에도 비공개 PNG로 저장 | `target_id`(선택); 이미지 콘텐츠와 저장 경로·바이트 수 동시 반환 |
 
 - **탭 지정:** 기본 탭 대신 특정 화면을 다루려면 `browser_tabs`로 `target_id`를 확인한 뒤 전달합니다.
-- **화면 캡처:** `browser_screenshot`은 이미지를 채팅에 직접 첨부하지 않고 서버에 저장한 **파일 경로**를 반환합니다.
+- **화면 캡처:** `browser_screenshot`은 MCP의 **텍스트 메타데이터 + `image/png` 이미지 콘텐츠**를 반환하고, 서버에도 접근 권한 `0600`의 PNG를 저장합니다. 클라이언트가 이미지 콘텐츠 표시를 지원해야 실제 채팅에서 이미지가 보입니다. 8 MiB를 초과하거나 PNG가 아닌 응답은 거부합니다.
 
 </details>
 
