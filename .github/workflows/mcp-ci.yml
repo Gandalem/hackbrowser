@@ -79,27 +79,3 @@ jobs:
           echo "- Evidence: ci-evidence artifact (tests log)" >> "$GITHUB_STEP_SUMMARY"
 
 
-  bootstrap-v1-0-1-release:
-    name: One-time v1.0.1 tag and deploy trigger
-    needs: source-tests
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && github.event.head_commit.message == 'Bootstrap v1.0.1 tag and deploy via Actions'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      actions: write
-    steps:
-      - name: Create version tag from this tested commit
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/git/refs" \
-            -f ref="refs/tags/v1.0.1" -f sha="$GITHUB_SHA"
-          echo "Created v1.0.1 at `$GITHUB_SHA`" >> "$GITHUB_STEP_SUMMARY"
-      - name: Dispatch release and OCI deployment
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          gh workflow run mcp-release.yml --repo "$GITHUB_REPOSITORY" --ref v1.0.1
-          echo "Dispatched tagged release workflow for v1.0.1" >> "$GITHUB_STEP_SUMMARY"
