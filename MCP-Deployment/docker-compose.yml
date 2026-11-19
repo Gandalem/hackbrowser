@@ -1,0 +1,73 @@
+name: mcp-deployment
+services:
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./runtime/zap/mcp.properties:/zap/wrk/mcp.properties:ro
+    command:
+      - zap.sh
+      - -daemon
+      - -host
+      - 127.0.0.1
+      - -port
+      - "8090"
+      - -addoninstall
+      - mcp
+      - -configfile
+      - /zap/wrk/mcp.properties
+  postgres:
+    profiles: [oauth]
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - oauth_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+  keycloak:
+    profiles: [oauth]
+    image: quay.io/keycloak/keycloak:26.8.1
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?Configure POSTGRES_PASSWORD}
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_HOSTNAME: ${PUBLIC_BASE_URL:?Configure PUBLIC_BASE_URL}/auth
+      KC_PROXY_HEADERS: xforwarded
+      KC_BOOTSTRAP_ADMIN_USERNAME: mcpadmin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Configure KEYCLOAK_ADMIN_PASSWORD}
+      KC_FEATURES: resource-indicators
+    command: ["start"]
+    ports:
+      - "127.0.0.1:8081:8080"
+    networks:
+      - oauth_internal
+  caddy:
+    image: caddy:2.10.2
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./runtime/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./runtime/caddy/data:/data
+      - ./runtime/caddy/config:/config
+volumes:
+  postgres_data:
+networks:
+  oauth_internal:
+    internal: true
