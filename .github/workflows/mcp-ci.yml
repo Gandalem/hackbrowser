@@ -39,7 +39,14 @@ jobs:
       - name: Validate deploy and smoke scripts
         run: |
           bash -n scripts/deploy_release.sh
-          python -m py_compile scripts/check_calls.py
+          python -m py_compile scripts/check_calls.py scripts/render_evidence.py
+      - name: Create CI evidence screenshot
+        if: always()
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          if [ -f evidence/ci-tests.log ]; then
+            python scripts/render_evidence.py evidence/ci-tests.log evidence/ci-tests.png "CI | ARM64 source validation"
+          fi
       - name: Package release
         working-directory: .
         run: tar -czf mcp-release.tar.gz --exclude='MCP-Deployment/runtime' --exclude='__pycache__' MCP-Deployment
@@ -104,7 +111,8 @@ jobs:
           ssh_opts=(-i "$HOME/.ssh/id_ci_deploy" -o BatchMode=yes -o StrictHostKeyChecking=yes)
           destination="$DEPLOY_USER@$DEPLOY_HOST"
           scp "${ssh_opts[@]}" mcp-release.tar.gz "$destination:mcp-release-$GITHUB_SHA.tar.gz"
-          ssh "${ssh_opts[@]}" "$destination" "bash -s -- '$GITHUB_SHA'" <<'REMOTE'
+          mkdir -p evidence
+          ssh "${ssh_opts[@]}" "$destination" "bash -s -- '$GITHUB_SHA'" <<'REMOTE' 2>&1 | tee evidence/oci-deploy.log
           set -euo pipefail
           commit="$1"
           archive="$HOME/mcp-release-$commit.tar.gz"
@@ -117,3 +125,19 @@ jobs:
           echo "### OCI deployment" >> "$GITHUB_STEP_SUMMARY"
           echo "Deployment completed: \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
           echo "Status and tools/call verification succeeded." >> "$GITHUB_STEP_SUMMARY"
+      - name: Generate deployment evidence screenshot
+        if: always()
+        run: |
+          python -m pip install --disable-pip-version-check Pillow
+          if [ -f evidence/oci-deploy.log ]; then
+              tar -xzf mcp-release.tar.gz MCP-Deployment/scripts/render_evidence.py
+            python MCP-Deployment/scripts/render_evidence.py evidence/oci-deploy.log evidence/oci-deploy.png "CD | OCI MCP deployment"
+          fi
+      - name: Upload deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-deploy-evidence
+          path: evidence/
+          if-no-files-found: ignore
+          retention-days: 30
