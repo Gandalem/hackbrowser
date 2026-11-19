@@ -38,7 +38,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee evidence/ci-tests.log
       - name: Validate deploy and smoke scripts
         run: |
-          bash -n scripts/deploy_release.sh
+          bash -n scripts/deploy_release.sh scripts/package_release.sh
           python -m py_compile scripts/check_calls.py scripts/render_evidence.py
       - name: Create CI evidence screenshot
         if: always()
@@ -47,9 +47,13 @@ jobs:
           if [ -f evidence/ci-tests.log ]; then
             python scripts/render_evidence.py evidence/ci-tests.log evidence/ci-tests.png "CI | ARM64 source validation"
           fi
-      - name: Package release
+      - name: Test versioned release archive and SHA-256
         working-directory: .
-        run: tar -czf mcp-release.tar.gz --exclude='MCP-Deployment/runtime' --exclude='__pycache__' MCP-Deployment
+        run: |
+          set -euo pipefail
+          bash MCP-Deployment/scripts/package_release.sh snapshot "$GITHUB_SHA"
+          (cd dist && sha256sum -c mcp-deployment-snapshot.tar.gz.sha256)
+          cp dist/mcp-release.tar.gz mcp-release.tar.gz
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
