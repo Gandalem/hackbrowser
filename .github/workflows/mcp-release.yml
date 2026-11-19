@@ -4,14 +4,12 @@ on:
   push:
     tags:
       - 'v*'
-  release:
-    types: [published]
 
 permissions:
   contents: read
 
 concurrency:
-  group: mcp-release-${{ github.event.release.tag_name || github.ref_name }}
+  group: mcp-release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -24,12 +22,12 @@ jobs:
       - name: Checkout exact release tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || github.ref_name }}
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
       - name: Validate version and release ancestry
         id: version
         env:
-          VERSION: ${{ github.event.release.tag_name || github.ref_name }}
+          VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
