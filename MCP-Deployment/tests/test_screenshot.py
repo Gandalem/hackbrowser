@@ -46,7 +46,8 @@ class ScreenshotTests(unittest.TestCase):
 
             # ImageContent is preserved; a short-lived file link is additive.
             self.assertNotIn("download_url", meta1)
-            with mock.patch.object(browser, "PUBLIC_BASE_URL", "https://mcp.example.test"):
+            with mock.patch.object(browser, "PUBLIC_BASE_URL", "https://mcp.example.test"), \
+                 mock.patch.object(browser, "_cdp", return_value={"data": encoded}):
                 result3 = browser.browser_screenshot()
             meta3 = json.loads(result3[0].text)
             self.assertRegex(meta3["download_url"], r"^https://mcp\\.example\\.test/captures/hb-[0-9a-f]{48}\\.png$")
