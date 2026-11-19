@@ -103,16 +103,25 @@ jobs:
           DEPLOY_HOST_KEYS: ${{ secrets.OCI_SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
+          mkdir -p evidence
+          echo "[START] OCI SSH deployment preflight" | tee evidence/oci-deploy.log
           install -d -m 700 "$HOME/.ssh"
-          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/id_ci_deploy"
-          printf '%s\n' "$DEPLOY_HOST_KEYS" > "$HOME/.ssh/known_hosts"
+          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > "$HOME/.ssh/id_ci_deploy"
+          printf '%s\n' "$DEPLOY_HOST_KEYS" | tr -d '\r' > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/id_ci_deploy" "$HOME/.ssh/known_hosts"
           trap 'rm -f "$HOME/.ssh/id_ci_deploy"' EXIT
-          ssh_opts=(-i "$HOME/.ssh/id_ci_deploy" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          if ! ssh-keygen -y -P "" -f "$HOME/.ssh/id_ci_deploy" >/dev/null 2>&1; then
+            echo "[FAIL] OCI_SSH_PRIVATE_KEY is invalid, not multiline OpenSSH private key, or password protected" | tee -a evidence/oci-deploy.log
+            exit 1
+          fi
+          echo "[PASS] SSH private key format" | tee -a evidence/oci-deploy.log
+          ssh_opts=(-i "$HOME/.ssh/id_ci_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
           destination="$DEPLOY_USER@$DEPLOY_HOST"
-          scp "${ssh_opts[@]}" mcp-release.tar.gz "$destination:mcp-release-$GITHUB_SHA.tar.gz"
-          mkdir -p evidence
-          ssh "${ssh_opts[@]}" "$destination" "bash -s -- '$GITHUB_SHA'" <<'REMOTE' 2>&1 | tee evidence/oci-deploy.log
+          echo "[START] SCP transfer of tested release" | tee -a evidence/oci-deploy.log
+          scp "${ssh_opts[@]}" mcp-release.tar.gz "$destination:mcp-release-$GITHUB_SHA.tar.gz" 2>&1 | tee -a evidence/oci-deploy.log
+          echo "[PASS] SCP transfer" | tee -a evidence/oci-deploy.log
+          echo "[START] OCI deployment and MCP tool calls" | tee -a evidence/oci-deploy.log
+          ssh "${ssh_opts[@]}" "$destination" "bash -s -- '$GITHUB_SHA'" <<'REMOTE' 2>&1 | tee -a evidence/oci-deploy.log
           set -euo pipefail
           commit="$1"
           archive="$HOME/mcp-release-$commit.tar.gz"
@@ -122,6 +131,7 @@ jobs:
           sudo -n bash "$stage/MCP-Deployment/scripts/deploy_release.sh" \
             "$stage/MCP-Deployment" "$commit"
           REMOTE
+          echo "[PASS] OCI deployment and MCP checks" | tee -a evidence/oci-deploy.log
           echo "### OCI deployment" >> "$GITHUB_STEP_SUMMARY"
           echo "Deployment completed: \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
           echo "Status and tools/call verification succeeded." >> "$GITHUB_STEP_SUMMARY"
