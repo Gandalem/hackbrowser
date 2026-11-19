@@ -193,28 +193,49 @@ if ! docker compose version >/dev/null 2>&1; then
   echo 'Docker Compose v2 unavailable' >&2; exit 1
 fi
 
-# Modern Chromium is required; the historical Electron HackBrowser is not installed.
+# Use the ARM64 Chrome for Testing build proven to work with the local CDP bridge.
+# Ubuntu 22.04 chromium is Snap-based and fails in this non-login systemd service.
+ARCH="$(dpkg --print-architecture)"
 CHROME_BINARY=''
-for binary in google-chrome-stable google-chrome chromium chromium-browser; do
-  if command -v "$binary" >/dev/null 2>&1; then
-    CHROME_BINARY="$(command -v "$binary")"; break
+if [[ "$ARCH" == 'arm64' ]]; then
+  CHROME_VERSION="${CHROME_CFT_VERSION:-158.0.8127.36}"
+  if [[ ! "$CHROME_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Invalid Chrome version: $CHROME_VERSION" >&2; exit 1
   fi
-done
-if [[ -z "$CHROME_BINARY" ]]; then
-  if [[ "$(dpkg --print-architecture)" == 'amd64' ]]; then
-    tmp="$(mktemp --suffix=.deb)"
-    curl -fL --retry 3 -o "$tmp" https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-    apt-get install -y "$tmp"
-    rm -f "$tmp"
-  else
-    apt-get install -y chromium || apt-get install -y chromium-browser || true
+  CHROME_BINARY='/opt/mcp-chrome/chrome-linux-arm64/chrome'
+  if [[ ! -x "$CHROME_BINARY" ]]; then
+    apt-get install -y --no-install-recommends \
+      unzip libnss3 libatk1.0-0 libatk-bridge2.0-0 libgbm1 libasound2 \
+      libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 libgtk-3-0
+    chrome_zip="$(mktemp --suffix=.zip)"
+    curl -fL --retry 3 -o "$chrome_zip" \
+      "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux-arm64/chrome-linux-arm64.zip"
+    install -d -m 0755 /opt/mcp-chrome
+    unzip -oq "$chrome_zip" -d /opt/mcp-chrome
+    rm -f "$chrome_zip"
+    chmod -R a+rX /opt/mcp-chrome
   fi
-fi
-if ! command -v google-chrome-stable >/dev/null 2>&1 && \
-   ! command -v chromium >/dev/null 2>&1 && \
-   ! command -v chromium-browser >/dev/null 2>&1; then
-  echo 'No Chromium found. On ARM64 install a functional chromium binary then re-run.' >&2
-  exit 1
+  if [[ ! -x "$CHROME_BINARY" ]]; then
+    echo "ARM64 Chrome executable missing: $CHROME_BINARY" >&2; exit 1
+  fi
+else
+  # Retain the distro/Google Chrome installation path on other architectures.
+  for binary in google-chrome-stable google-chrome chromium chromium-browser; do
+    if command -v "$binary" >/dev/null 2>&1; then
+      CHROME_BINARY="$(command -v "$binary")"; break
+    fi
+  done
+  if [[ -z "$CHROME_BINARY" && "$ARCH" == 'amd64' ]]; then
+    chrome_deb="$(mktemp --suffix=.deb)"
+    curl -fL --retry 3 -o "$chrome_deb" \
+      https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+    apt-get install -y "$chrome_deb"
+    rm -f "$chrome_deb"
+    CHROME_BINARY="$(command -v google-chrome-stable)"
+  fi
+  if [[ -z "$CHROME_BINARY" ]]; then
+    echo "No supported Chrome/Chromium browser found for architecture $ARCH" >&2; exit 1
+  fi
 fi
 
 # Three separate venvs minimize dependency conflicts.
@@ -245,6 +266,16 @@ make_unit() {
 }
 make_unit pocmap 'PocMap MCP' "$ROOT/runtime/venv-pocmap/bin/pocmap-mcp --transport http --host 127.0.0.1 --port 9000" ''
 make_unit chromium 'Headless Chromium CDP for MCP' "/bin/bash $ROOT/services/hackbrowser/start_chromium_headless.sh" ''
+if [[ "$ARCH" == 'arm64' ]]; then
+  # The browser runs as the existing unprivileged mcpstack account, without Snap.
+  install -d -m 0700 -o mcpstack -g "$MCP_GROUP" /var/lib/mcpstack/.runtime
+  mkdir -p /etc/systemd/system/mcpstack-chromium.service.d
+  cat > /etc/systemd/system/mcpstack-chromium.service.d/10-arm64-chrome.conf <<EOF
+[Service]
+Environment=XDG_RUNTIME_DIR=/var/lib/mcpstack/.runtime
+Environment=CHROMIUM_BIN=$CHROME_BINARY
+EOF
+fi
 make_unit hackbrowser 'HackBrowser CDP MCP bridge' "$ROOT/runtime/venv-hackbrowser/bin/python $ROOT/services/hackbrowser/server.py" 'After=mcpstack-chromium.service'
 make_unit share 'Time-limited generic MCP gateway' "$ROOT/runtime/venv-gateway/bin/python $ROOT/services/gateway/shared_gateway.py" ''
 make_unit oauth 'Keycloak OAuth JWT MCP gateway' "$ROOT/runtime/venv-gateway/bin/python $ROOT/services/gateway/oauth_gateway.py" ''
