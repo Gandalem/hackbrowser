@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install test dependencies
-        run: python -m pip install --disable-pip-version-check PyYAML
+        run: python -m pip install --disable-pip-version-check PyYAML "mcp>=2,<3" "websocket-client>=1.8,<2"
       - name: Run unit tests and preserve evidence
         run: |
           set -o pipefail
