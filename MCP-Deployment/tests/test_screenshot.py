@@ -50,7 +50,7 @@ class ScreenshotTests(unittest.TestCase):
                  mock.patch.object(browser, "_cdp", return_value={"data": encoded}):
                 result3 = browser.browser_screenshot()
             meta3 = json.loads(result3[0].text)
-            self.assertRegex(meta3["download_url"], r"^https://mcp\\.example\\.test/captures/hb-[0-9a-f]{48}\\.png$")
+            self.assertRegex(meta3["download_url"], r"^https://mcp\.example\.test/captures/hb-[0-9a-f]{48}\.png$")
             self.assertEqual(meta3["expires_in_seconds"], 600)
             self.assertIsInstance(result3[1], ImageContent)
 
