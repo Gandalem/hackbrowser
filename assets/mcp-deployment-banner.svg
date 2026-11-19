@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="580" viewBox="0 0 1600 580" role="img" aria-label="MCP Deployment: PocMap, HackBrowser MCP, and OWASP ZAP MCP">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#071423"/><stop offset=".53" stop-color="#09192D"/><stop offset="1" stop-color="#120C2D"/></linearGradient>
+    <linearGradient id="cyan" x1="0" x2="1"><stop stop-color="#0FEBF5"/><stop offset="1" stop-color="#559AFD"/></linearGradient>
+    <linearGradient id="purple" x1="0" x2="1"><stop stop-color="#8C78FF"/><stop offset="1" stop-color="#DB72F4"/></linearGradient>
+    <linearGradient id="card" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#112B42" stop-opacity=".9"/><stop offset="1" stop-color="#0A1930" stop-opacity=".85"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#08D9EF" stop-opacity=".22"/><stop offset="1" stop-color="#08D9EF" stop-opacity="0"/></radialGradient>
+    <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M50 0H0V50" fill="none" stroke="#2D5980" stroke-opacity=".12"/></pattern>
+    <filter id="blur"><feGaussianBlur stdDeviation="26"/></filter>
+    <filter id="soft"><feGaussianBlur stdDeviation="3"/></filter>
+  </defs>
+  <rect width="1600" height="580" fill="url(#bg)"/>
+  <rect width="1600" height="580" fill="url(#grid)"/>
+  <ellipse cx="800" cy="355" rx="720" ry="265" fill="url(#glow)"/>
+  <ellipse cx="800" cy="535" rx="570" ry="35" fill="#08E5EC" opacity=".10" filter="url(#blur)"/>
+  <path d="M0 512 Q400 474 800 528 T1600 498" fill="none" stroke="#1B8CCA" stroke-opacity=".27" stroke-width="2"/>
+  <path d="M0 533 Q400 495 800 548 T1600 518" fill="none" stroke="#653DC3" stroke-opacity=".25" stroke-width="2"/>
+  <path d="M75 80h60M75 80v60M1525 80h-60M1525 80v60" stroke="#26DFF5" stroke-opacity=".65" stroke-width="4" fill="none"/>
+  <text x="800" y="80" fill="#88C8DE" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="20" letter-spacing="7">SECURITY MCP TOOLCHAIN</text>
+  <text x="800" y="177" fill="#EFF8FF" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="900" font-size="81" letter-spacing="2">MCP <tspan fill="#26F0F5">DEPLOYMENT</tspan></text>
+  <rect x="640" y="206" width="320" height="4" rx="2" fill="url(#cyan)" opacity=".9"/>
+  <text x="800" y="247" fill="#A9C6DA" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="24">PocMap  ·  Browser Automation  ·  OWASP ZAP</text>
+  <g>
+    <rect x="90" y="303" width="438" height="180" rx="23" fill="url(#card)" stroke="#14DDEB" stroke-width="2.5"/>
+    <rect x="90" y="303" width="438" height="180" rx="23" fill="none" stroke="#14DDEB" stroke-opacity=".35" stroke-width="9" filter="url(#soft)"/>
+    <path d="M158 354l32-16 32 16v37c0 27-17 46-32 54-15-8-32-27-32-54z" fill="none" stroke="#0EEDF1" stroke-width="5"/>
+    <circle cx="190" cy="387" r="15" fill="none" stroke="#0EEDF1" stroke-width="4"/><path d="M190 372v-13M190 402v13M175 387h-13M205 387h13" stroke="#0EEDF1" stroke-width="3"/>
+    <text x="266" y="386" fill="#F2FCFF" font-family="Arial,Helvetica,sans-serif" font-size="41" font-weight="800">PocMap</text>
+    <text x="266" y="428" fill="#91B9D6" font-family="Arial,Helvetica,sans-serif" font-size="20">VULNERABILITY INTEL</text>
+    <rect x="580" y="303" width="438" height="180" rx="23" fill="url(#card)" stroke="#24B7FD" stroke-width="2.5"/>
+    <rect x="580" y="303" width="438" height="180" rx="23" fill="none" stroke="#24B7FD" stroke-opacity=".35" stroke-width="9" filter="url(#soft)"/>
+    <rect x="623" y="346" width="87" height="72" rx="10" fill="none" stroke="#66DFFF" stroke-width="5"/>
+    <path d="M623 368h87M648 359h3M659 359h3" stroke="#66DFFF" stroke-width="4" stroke-linecap="round"/>
+    <path d="M660 379l15 23 2-12 13-1z" fill="#59DCFF"/>
+    <text x="742" y="382" fill="#F2FCFF" font-family="Arial,Helvetica,sans-serif" font-size="37" font-weight="800">HackBrowser</text>
+    <text x="742" y="422" fill="#91B9D6" font-family="Arial,Helvetica,sans-serif" font-size="24" font-weight="700">MCP · CDP BRIDGE</text>
+    <rect x="1070" y="303" width="438" height="180" rx="23" fill="url(#card)" stroke="#9672FD" stroke-width="2.5"/>
+    <rect x="1070" y="303" width="438" height="180" rx="23" fill="none" stroke="#9672FD" stroke-opacity=".38" stroke-width="9" filter="url(#soft)"/>
+    <circle cx="1159" cy="385" r="44" fill="none" stroke="#9D84FF" stroke-width="5"/>
+    <path d="M1167 344l-30 50h25l-14 37 46-58h-28z" fill="#B99AFF"/>
+    <text x="1234" y="385" fill="#F2FCFF" font-family="Arial,Helvetica,sans-serif" font-size="40" font-weight="800">OWASP ZAP</text>
+    <text x="1234" y="425" fill="#A69DD6" font-family="Arial,Helvetica,sans-serif" font-size="22" font-weight="700">MCP · WEB TESTING</text>
+  </g>
+  <path d="M528 390h52M1018 390h52" stroke="url(#cyan)" stroke-width="4" stroke-dasharray="10 8" opacity=".85"/>
+  <circle cx="554" cy="390" r="6" fill="#40F4FF"/><circle cx="1043" cy="390" r="6" fill="#947CFF"/>
+  <text x="800" y="534" text-anchor="middle" fill="#9EC6DE" font-family="Arial,Helvetica,sans-serif" font-size="19" letter-spacing="3">MCP INTEGRATION  /  AUTOMATION PROJECT</text>
+</svg>
