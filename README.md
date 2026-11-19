@@ -28,11 +28,11 @@ HackBrowser MCP (remote MCP tools)
 | [MCP-Deployment/services/hackbrowser/](./MCP-Deployment/services/hackbrowser/) | Chromium CDP를 제어하는 Python MCP 브리지 (도구 8개) |
 | [MCP-Deployment/tests/](./MCP-Deployment/tests/) | 패키지 정적 테스트 |
 | [MCP-Deployment/docs/PROVENANCE.md](./MCP-Deployment/docs/PROVENANCE.md) | 소스 출처 및 제약사항 |
-| `src/`, `main.js`, `package.json` | 원래 HackBrowser Electron 프로젝트 (레거시 원본) |
+| Git 이력 | 기존 Electron HackBrowser 원본 (기본 브랜치에서는 제외) |
 
 ### 원본과 MCP 브리지의 차이
 
-이 저장소는 [hackbrowser/hackbrowser](https://github.com/hackbrowser/hackbrowser)의 **Fork**입니다. 원본 HackBrowser는 Electron 기반이며 현재 유지보수되지 않습니다. 추가된 MCP 배포 패키지는 **원본 Electron 실행파일이 아닌 현대 Chromium + Python/CDP 브리지**를 사용합니다. 따라서 원본 Electron 앱의 ARM64 동작이 검증된 것은 아닙니다.
+이 저장소는 [hackbrowser/hackbrowser](https://github.com/hackbrowser/hackbrowser)의 **Fork**입니다. 사용하지 않는 Electron 원본 소스는 Git 이력에 보존하고 기본 브랜치에서 제외했습니다. 현재 배포 대상은 **Chromium + Python/CDP 기반 MCP 브리지**입니다.
 
 ## 소스 검증
 
