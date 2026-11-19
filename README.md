@@ -133,6 +133,105 @@ sudo bash /opt/mcp-deployment/uninstall.sh
 > 설치 스크립트는 systemd 기반 Ubuntu/Debian 호스트에서 실행합니다. 외부 MCP 접속에는 HTTPS·인증이 필요하며, 내부 CDP 포트(9222)를 공개하지 마세요.
 
 
+## 운영자 설정: MCP 로그인 계정 및 외부 도메인 적용
+
+외부 HTTPS 도메인과 DNS/프록시 연결은 이미 준비되어 있다고 가정합니다. 아래 내용은 **서버에서 해야 할 설정**만 다룹니다. 예시 `mcp.example.com`은 본인 도메인으로 변경하세요.
+
+### 1. 로그인 ID·초기 비밀번호 발급 및 조회
+
+새 서버에 **처음 설치할 때** `MCP_LOGIN_USER`로 로그인 ID를 지정할 수 있습니다(생략 시 `mcp-operator`). 초기 로그인 비밀번호와 Keycloak 관리자 비밀번호는 설치 스크립트가 자동 생성합니다. 이미 설치된 서버에서 설치 명령을 다시 실행해도 기존 계정·비밀번호는 초기화되지 않습니다.
+
+```bash
+# 외부 HTTPS 프록시/터널이 서버 앞에 있는 경우(HTTPS는 프록시에서 처리)
+cd hackbrowser/MCP-Deployment
+sudo PUBLIC_BASE_URL=https://mcp.example.com \
+  CADDY_MODE=external ENABLE_OAUTH=1 \
+  MCP_LOGIN_USER=mcp-operator SHARE_DAYS=7 bash install.sh
+```
+
+서버에서 발급된 정보를 확인합니다. **이 명령은 비밀번호를 터미널에 표시**하므로 화면 공유·로그 저장·GitHub 업로드 시 노출되지 않도록 주의하세요.
+
+```bash
+sudo grep -E '^(MCP_LOGIN_USER|MCP_LOGIN_PASSWORD|KEYCLOAK_ADMIN_PASSWORD)=' \
+  /opt/mcp-deployment/runtime/private.env
+```
+
+| 항목 | 용도 |
+|---|---|
+| `MCP_LOGIN_USER` / `MCP_LOGIN_PASSWORD` | Keycloak의 MCP 로그인 계정 ID / 최초 임시 비밀번호 |
+| Keycloak 관리자 ID `mcpadmin` / `KEYCLOAK_ADMIN_PASSWORD` | Keycloak 관리자 계정 (MCP 일반 로그인과 구분) |
+| `chatgpt-pocmap`, `chatgpt-hackbrowser`, `chatgpt-zap` | ChatGPT에 입력하는 각 OAuth **Client ID**. 사용자 로그인 ID가 아니며 공개 클라이언트라 Client Secret은 비움 |
+
+최초 로그인 시 임시 비밀번호를 변경해야 합니다. **변경 후 실제 비밀번호는 조회할 수 없으며**, `private.env`의 `MCP_LOGIN_PASSWORD`는 최초 발급값으로 남습니다. 기존 계정의 비밀번호를 바꿔야 한다면 Keycloak에서 **재설정**하세요. 이미 설치된 서버에서 `MCP_LOGIN_USER`나 비밀번호를 파일에서만 수정하는 것은 기존 Keycloak 사용자 정보를 변경하지 않습니다.
+
+### 2. 이미 설치된 서버에 외부 HTTPS 주소 적용
+
+기존 데이터를 보존하려면 **재설치 대신 환경설정만 변경**합니다. HTTPS 프록시/터널이 외부 TLS를 처리하고 서버의 `8088` 포트로 전달하는 경우 `CADDY_MODE=external`입니다. 서버의 Caddy가 직접 80/443을 받아 HTTPS 인증서까지 처리할 때만 `CADDY_MODE=public`을 사용하세요.
+
+```bash
+ROOT=/opt/mcp-deployment
+# 기존 비밀번호·토큰 보존을 위해 설정 백업
+sudo cp -p "$ROOT/runtime/private.env" "$ROOT/runtime/private.env.bak"
+sudoedit "$ROOT/runtime/private.env"
+sudoedit "$ROOT/runtime/public.env"
+```
+
+파일에서 다음 값을 맞춥니다. 기존 `POSTGRES_PASSWORD`, `KEYCLOAK_ADMIN_PASSWORD`, `MCP_LOGIN_PASSWORD` 등 **비밀값은 변경하지 마세요.**
+
+| 설정 파일 | 값 |
+|---|---|
+| `runtime/private.env` | `PUBLIC_BASE_URL=https://mcp.example.com` / `CADDY_MODE=external` / `ENABLE_OAUTH=1` |
+| `runtime/public.env` | `PUBLIC_BASE_URL=https://mcp.example.com` / `ENABLE_OAUTH=1` |
+
+설정을 렌더링하고 Keycloak/OAuth 서비스에 적용합니다.
+
+```bash
+ROOT=/opt/mcp-deployment
+sudo env MCP_INSTALL_ROOT="$ROOT" PUBLIC_BASE_URL=https://mcp.example.com \
+  CADDY_MODE=external ENABLE_OAUTH=1 \
+  python3 "$ROOT/scripts/render_config.py"
+
+sudo docker compose --env-file "$ROOT/runtime/private.env" \
+  -f "$ROOT/docker-compose.yml" --profile oauth up -d postgres keycloak
+
+# Keycloak이 기동된 후 OAuth 클라이언트와 사용자 설정
+until curl -fsS --max-time 5 \
+  http://127.0.0.1:8081/auth/realms/master/.well-known/openid-configuration \
+  >/dev/null; do sleep 3; done
+sudo python3 "$ROOT/scripts/provision_keycloak.py"
+
+sudo systemctl enable --now mcpstack-oauth.service
+sudo systemctl restart mcpstack-oauth.service
+sudo docker compose --env-file "$ROOT/runtime/private.env" \
+  -f "$ROOT/docker-compose.yml" restart caddy
+sudo bash "$ROOT/status.sh"
+```
+
+외부 도메인을 통한 MCP 주소는 아래와 같습니다. ChatGPT OAuth Client ID는 위 표를 사용하고, 최초 로그인은 `MCP_LOGIN_USER`로 진행합니다.
+
+| MCP | ChatGPT에 등록할 서버 URL |
+|---|---|
+| PocMap | `https://mcp.example.com/pocmap/mcp` |
+| HackBrowser | `https://mcp.example.com/hackbrowser/mcp` |
+| ZAP | `https://mcp.example.com/zap/mcp` |
+
+### 3. 서버 측 정상 동작 확인
+
+```bash
+# 로컬 게이트웨이 확인
+curl -i http://127.0.0.1:8088/healthz
+# 로그인 전 MCP 경로는 HTTP 401이 정상(OAuth 인증 요구)
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  http://127.0.0.1:8088/pocmap/mcp
+# 공개 도메인 경로 확인
+curl -i https://mcp.example.com/healthz
+sudo bash /opt/mcp-deployment/status.sh
+```
+
+`/healthz`는 `200`, 인증 없이 호출한 `/pocmap/mcp`는 `401`이 정상입니다. `status.sh`에서는 Keycloak HTTP 응답과 MCP 서비스별 도구 검색을 확인합니다. 외부 HTTPS 프록시는 `Authorization` 및 MCP 관련 헤더를 전달하고 캐시를 사용하지 않아야 합니다. **8081(Keycloak), 9222(CDP), 8282(ZAP) 등 내부 포트는 외부에 공개하지 말고, 8088도 신뢰한 프록시에서만 접근하도록 제한**하세요.
+
+자세한 설치 구조와 기타 운영 제약은 [`MCP-Deployment/README.md`](./MCP-Deployment/README.md)를 참고합니다.
+
 ## 버전 태그 기반 자동 Release / OCI 업데이트
 
 `master`의 일반 커밋은 **CI 검증만** 합니다. 실제 릴리스/OCI 배포는 `vMAJOR.MINOR.PATCH` 형식의 **새 태그를 푸시할 때만** 실행됩니다.
