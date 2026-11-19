@@ -44,6 +44,16 @@ class ScreenshotTests(unittest.TestCase):
             self.assertEqual(Path(meta2["saved_path"]).read_bytes(), PNG)
             self.assertEqual(Path(meta1["saved_path"]).stat().st_mode & 0o777, 0o600)
 
+            # ImageContent is preserved; a short-lived file link is additive.
+            self.assertNotIn("download_url", meta1)
+            with mock.patch.object(browser, "PUBLIC_BASE_URL", "https://mcp.example.test"):
+                result3 = browser.browser_screenshot()
+            meta3 = json.loads(result3[0].text)
+            self.assertRegex(meta3["download_url"], r"^https://mcp\\.example\\.test/captures/hb-[0-9a-f]{48}\\.png$")
+            self.assertEqual(meta3["expires_in_seconds"], 600)
+            self.assertIsInstance(result3[1], ImageContent)
+
+
     def test_invalid_base64_does_not_create_a_file(self):
         with tempfile.TemporaryDirectory() as directory:
             with mock.patch.object(browser, "SCREENSHOT_DIR", Path(directory)), \
