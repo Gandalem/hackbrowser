@@ -47,7 +47,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install test dependencies
-        run: python -m pip install --disable-pip-version-check PyYAML Pillow
+        run: python -m pip install --disable-pip-version-check PyYAML Pillow "mcp>=2,<3" "websocket-client>=1.8,<2"
       - name: Run CI tests and capture real output
         working-directory: MCP-Deployment
         run: |
