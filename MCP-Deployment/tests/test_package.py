@@ -50,6 +50,8 @@ class SourceTests(unittest.TestCase):
                 content = (Path(td) / "runtime/caddy/Caddyfile").read_text()
                 self.assertTrue(content.startswith(site + " {"))
                 self.assertIn("handle /share/*", content)
+                self.assertIn("handle /captures/*", content)
+                self.assertIn("127.0.0.1:8790", content)
                 self.assertEqual("@oauth_mcp" in content, oauth == "1")
                 self.assertIn("127.0.0.1:8790", content)
 
