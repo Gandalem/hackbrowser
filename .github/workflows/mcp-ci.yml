@@ -1,4 +1,4 @@
-name: MCP package CI
+name: MCP CI/CD
 
 on:
   push:
@@ -17,12 +17,13 @@ permissions:
 
 jobs:
   source-tests:
+    name: CI - source tests and release package
     runs-on: ubuntu-24.04-arm
     defaults:
       run:
         working-directory: MCP-Deployment
     steps:
-      - name: Checkout repository
+      - name: Checkout source
         uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,5 +31,89 @@ jobs:
           python-version: "3.11"
       - name: Install test dependencies
         run: python -m pip install --disable-pip-version-check PyYAML
-      - name: Validate source package
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Run unit tests and preserve evidence
+        run: |
+          set -o pipefail
+          mkdir -p evidence
+          python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee evidence/ci-tests.log
+      - name: Validate deploy and smoke scripts
+        run: |
+          bash -n scripts/deploy_release.sh
+          python -m py_compile scripts/check_calls.py
+      - name: Package release
+        working-directory: .
+        run: tar -czf mcp-release.tar.gz --exclude='MCP-Deployment/runtime' --exclude='__pycache__' MCP-Deployment
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-release
+          path: mcp-release.tar.gz
+          retention-days: 7
+      - name: Upload CI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence
+          path: MCP-Deployment/evidence/
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: CI job summary
+        if: always()
+        run: |
+          echo "### MCP CI result" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Runner: ubuntu-24.04-arm" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Evidence: ci-evidence artifact (tests log)" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-oci:
+    name: CD - OCI deployment and backend verification
+    needs: source-tests
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request' && vars.OCI_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    environment: oci-production
+    concurrency:
+      group: oci-mcp-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Download tested release
+        uses: actions/download-artifact@v4
+        with:
+          name: mcp-release
+      - name: Validate SSH configuration
+        env:
+          DEPLOY_HOST: ${{ secrets.OCI_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.OCI_SSH_USER }}
+          DEPLOY_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST_KEYS: ${{ secrets.OCI_SSH_KNOWN_HOSTS }}
+        run: |
+          test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_KEY" && test -n "$DEPLOY_HOST_KEYS"
+      - name: Deploy tested package and capture evidence
+        env:
+          DEPLOY_HOST: ${{ secrets.OCI_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.OCI_SSH_USER }}
+          DEPLOY_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST_KEYS: ${{ secrets.OCI_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/id_ci_deploy"
+          printf '%s\n' "$DEPLOY_HOST_KEYS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ci_deploy" "$HOME/.ssh/known_hosts"
+          trap 'rm -f "$HOME/.ssh/id_ci_deploy"' EXIT
+          ssh_opts=(-i "$HOME/.ssh/id_ci_deploy" -o BatchMode=yes -o StrictHostKeyChecking=yes)
+          destination="$DEPLOY_USER@$DEPLOY_HOST"
+          scp "${ssh_opts[@]}" mcp-release.tar.gz "$destination:mcp-release-$GITHUB_SHA.tar.gz"
+          ssh "${ssh_opts[@]}" "$destination" "bash -s -- '$GITHUB_SHA'" <<'REMOTE'
+          set -euo pipefail
+          commit="$1"
+          archive="$HOME/mcp-release-$commit.tar.gz"
+          stage="$(mktemp -d)"
+          trap 'rm -rf -- "$stage" "$archive"' EXIT
+          tar -xzf "$archive" -C "$stage"
+          sudo -n bash "$stage/MCP-Deployment/scripts/deploy_release.sh" \
+            "$stage/MCP-Deployment" "$commit"
+          REMOTE
+          echo "### OCI deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deployment completed: \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Status and tools/call verification succeeded." >> "$GITHUB_STEP_SUMMARY"
