@@ -67,14 +67,23 @@ def get_token():
 
 
 TOKEN = None
-for _ in range(60):
+last_error = None
+for attempt in range(60):
     try:
         TOKEN = get_token()
         break
-    except (RuntimeError, urllib.error.URLError, TimeoutError):
-        time.sleep(3)
+    except (RuntimeError, OSError) as exc:
+        # Keycloak may close/reset the connection during its initial bootstrap.
+        # Retry rather than aborting on ConnectionResetError (Errno 104).
+        last_error = exc
+        if attempt < 59:
+            time.sleep(3)
 if not TOKEN:
-    raise SystemExit("Keycloak admin API not ready after 180 seconds (check docker compose logs keycloak)")
+    raise SystemExit(
+        f"Keycloak admin API unavailable after retries; last error: "
+        f"{type(last_error).__name__}: {last_error}. "
+        "Check Keycloak logs and the host-only 127.0.0.1:8081 port mapping."
+    )
 
 realm_path = "/admin/realms/" + REALM
 try:

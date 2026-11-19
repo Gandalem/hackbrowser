@@ -57,10 +57,38 @@ cp "$SOURCE/install.sh" "$ROOT/install.sh"
 chmod 0755 "$ROOT/services/hackbrowser/start_chromium_headless.sh"
 "$ROOT/runtime/venv-hackbrowser/bin/python" -m py_compile "$ROOT/services/hackbrowser/server.py"
 systemctl restart mcpstack-hackbrowser.service mcpstack-share.service
-if systemctl is-enabled --quiet mcpstack-oauth.service; then
+docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" up -d zap caddy
+# Apply Keycloak Compose changes on upgrades as well as fresh installs.
+# Otherwise existing OAuth installations retain the old internal-only network
+# and silently lose the loopback-published 8081 port after container recreation.
+if grep -q '^ENABLE_OAUTH=1healthy=0
+for attempt in $(seq 1 18); do
+  if bash "$ROOT/status.sh" >/dev/null 2>&1 && python3 "$ROOT/scripts/check_calls.py" >/dev/null 2>&1; then
+    healthy=1
+    break
+  fi
+  sleep 10
+done
+if [[ "$healthy" -ne 1 ]]; then
+  echo "MCP discovery or actual tool-call verification failed" >&2
+  false
+fi
+trap - ERR
+printf '%s\n' "$SHA" > "$ROOT/runtime/deployed-commit"
+chmod 0644 "$ROOT/runtime/deployed-commit"
+if [[ -n "$VERSION" ]]; then
+  printf '%s\n' "$VERSION" > "$ROOT/runtime/deployed-version"
+  chmod 0644 "$ROOT/runtime/deployed-version"
+fi
+echo "DEPLOYMENT PASS version=${VERSION:-unknown} commit=$SHA"
+bash "$ROOT/status.sh"
+python3 "$ROOT/scripts/check_calls.py"
+rm -rf -- "$BACKUP"
+ "$ROOT/runtime/private.env"; then
+  docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" --profile oauth up -d postgres keycloak
+  systemctl enable --now mcpstack-oauth.service
   systemctl restart mcpstack-oauth.service
 fi
-docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" up -d zap caddy
 healthy=0
 for attempt in $(seq 1 18); do
   if bash "$ROOT/status.sh" >/dev/null 2>&1 && python3 "$ROOT/scripts/check_calls.py" >/dev/null 2>&1; then

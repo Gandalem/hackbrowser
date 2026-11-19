@@ -14,7 +14,7 @@ AWS EC2 전용이 아닌 **Ubuntu/Debian 시스템**에서 동일한 MCP 구성�
 ## 필수 조건
 
 - **Ubuntu/Debian x86_64** VM 또는 일반 서버와 `sudo` 권한, `systemd`, 인터넷 접속, 충분한 메모리(권장 8GB 이상), 저장공간(권장 15GB 이상). ARM64는 Chromium을 선행 설치해야 할 수 있습니다.
-- **외부 AI/ChatGPT 연결:** 서버를 가리키는 DNS 도메인, 해당 VM/클라우드 방화벽에서 TCP 80/443 허용, 유효한 HTTPS 인증서 발급 조건. 인증서 발급은 Caddy가 자동으로 수행합니다.
+- **외부 AI/ChatGPT 연결:** DNS 도메인과 HTTPS가 필요합니다. `public` 모드는 TCP 80/443 접근 및 Caddy 인증서 발급이 필요합니다. `external` 모드(Cloudflare Tunnel 등)는 외부 HTTPS 프록시가 TLS를 처리하므로 OCI 인바운드 80/443 개방이 필요하지 않습니다.
 - **로컬 VM 전용:** 도메인 없이 `http://127.0.0.1:8088` 사용 가능. 외부 AI 클라이언트에는 DNS·HTTPS 또는 SSH 터널이 필요합니다.
 - 기존 VM에서 Caddy, ZAP, Keycloak 또는 80/443/8090/8282/8765/8787/8790/9000/9222 등의 포트를 사용 중이면 충돌할 수 있습니다. **새 VM에 설치 권장**.
 
@@ -40,6 +40,38 @@ sudo PUBLIC_BASE_URL=http://127.0.0.1:8088 \
 CloudFront/로드밸런서/기존 HTTPS 프록시 뒤에 배치할 때는 `CADDY_MODE=external`을 선택합니다. 호스트 TCP 8088로 원본 프록시를 연결하고, 인증 헤더·MCP 헤더를 전달하며 캐시를 비활성화해야 합니다. **외부에서 8088로 직접 접근할 수 없도록 방화벽을 설정**하세요.
 
 설치 프로그램은 Docker, Python 가상환경, 최신 Chromium, systemd 서비스를 준비합니다. 사용자의 기존 키·계정 정보는 포함하지 않으며 **새 공유 토큰과 ZAP 키, Keycloak 관리자 비밀번호를 생성**합니다. 설치를 반복 실행해도 생성된 비밀번호와 만료 시각을 바꾸지 않습니다.
+
+## Cloudflare Named Tunnel / HTTPS 프록시 연결
+
+고정 도메인을 사용하는 Cloudflare **Named Tunnel**에서는 `CADDY_MODE=external`을 선택합니다. Cloudflare 대시보드에서 공개 애플리케이션 호스트명(예: `mcp.example.com`)을 서비스 `http://127.0.0.1:8088`로 연결하세요. OCI에서 cloudflared를 Docker로 실행하는 경우 호스트의 루프백 서비스에 닿도록 `--network host`를 사용합니다. Named Tunnel 토큰과 Keycloak 암호, `runtime/private.env`는 **GitHub에 커밋하지 않습니다**.
+
+새 설치 예시:
+
+```bash
+sudo PUBLIC_BASE_URL=https://mcp.example.com \\
+  CADDY_MODE=external ENABLE_OAUTH=1 SHARE_DAYS=7 bash install.sh
+```
+
+기존 `local` 설치에서 고정 도메인으로 변경하는 경우 **재설치하지 말고** `/opt/mcp-deployment/runtime/private.env`를 백업한 다음 `PUBLIC_BASE_URL=https://mcp.example.com`, `CADDY_MODE=external`, `ENABLE_OAUTH=1`로 수정합니다. `runtime/public.env`에도 `PUBLIC_BASE_URL`과 `ENABLE_OAUTH`를 동일하게 반영하고 아래 순서로 적용하세요.
+
+```bash
+ROOT=/opt/mcp-deployment
+sudo env MCP_INSTALL_ROOT="$ROOT" PUBLIC_BASE_URL=https://mcp.example.com \\
+  CADDY_MODE=external ENABLE_OAUTH=1 python3 "$ROOT/scripts/render_config.py"
+sudo docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" \\
+  --profile oauth up -d postgres keycloak
+# localhost:8081 Keycloak API가 HTTP 200을 반환한 뒤 진행
+sudo python3 "$ROOT/scripts/provision_keycloak.py"
+sudo systemctl enable --now mcpstack-oauth.service
+sudo docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" restart caddy
+sudo bash "$ROOT/status.sh"
+```
+
+Keycloak은 두 Docker 네트워크에 연결됩니다. `oauth_internal`은 PostgreSQL 통신 전용 격리망이고, `oauth_uplink`는 호스트의 `127.0.0.1:8081` 포트 게시를 위한 브리지입니다. PostgreSQL은 외부 브리지 네트워크에 연결하지 않습니다. `docker inspect`의 `HostConfig.PortBindings`에만 포트가 표시되더라도 `NetworkSettings.Ports={}`이면 실제 포트 게시가 되지 않은 상태일 수 있습니다.
+
+ChatGPT에서 각 MCP는 **사용자 정의 OAuth 클라이언트**로 등록합니다. 공개 클라이언트이므로 client secret은 비워 두고 토큰 엔드포인트 인증 방식은 `none`을 사용합니다. Client ID는 `chatgpt-pocmap`, `chatgpt-hackbrowser`, `chatgpt-zap`이고 범위는 각각 `mcp:pocmap`, `mcp:hackbrowser`, `mcp:zap`입니다. OAuth 리디렉션 URL은 `https://chatgpt.com/connector_platform_oauth_redirect`와 일치해야 합니다.
+
+`nslookup mcp.example.com 1.1.1.1`은 성공하지만 일반 `curl`이 DNS 해석에 실패한다면 OCI의 로컬 DNS 전파 문제를 별도로 확인하세요. HTTPS 터널 자체와 DNS 해석 문제는 구분해서 진단합니다.
 
 ## 접속 주소 확인
 
