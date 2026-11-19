@@ -75,7 +75,7 @@ jobs:
   deploy-oci:
     name: CD - OCI deployment and backend verification
     needs: source-tests
-    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request' && vars.OCI_DEPLOY_ENABLED == 'true'
+    if: false # OCI deployment runs only for version tags; see mcp-release.yml
     runs-on: ubuntu-24.04
     environment: oci-production
     concurrency:
