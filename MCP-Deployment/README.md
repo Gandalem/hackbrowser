@@ -125,6 +125,12 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 기대 결과: `/healthz`는 **200**, 인증 없는 `/pocmap/mcp`는 **401**, MCP 도구 검색은 PocMap 22 / HackBrowser 8 / ZAP 17개입니다. `check_calls.py`는 세 백엔드의 실제 호출과 HackBrowser PNG 이미지 블록을 확인합니다.
 
+## HackBrowser 스크린샷 다운로드
+
+`browser_screenshot`은 기존처럼 MCP `image/png` 블록과 서버의 비공개 저장 경로를 반환합니다. **추가로** `PUBLIC_BASE_URL`이 설정된 서버에서는 응답 메타데이터에 `download_url`과 `expires_in_seconds: 600`을 제공합니다. 다운로드는 `/captures/hb-<무작위 48자리 16진수>.png` 경로를 통해 진행하며 10분 후 HTTP 404를 반환합니다. 링크는 로그인 대신 무작위 ID가 접근 권한 역할을 하므로 절대 공개하지 마세요.
+
+이 URL은 **파일 다운로드용 대체 경로**이며, ChatGPT가 자동으로 PNG를 채팅 첨부파일로 등록하는 기능을 보장하지 않습니다. 사용 중인 ChatGPT 클라이언트에서 별도로 확인해야 합니다. 이전과 동일하게 사용자 데이터가 포함된 화면을 캡처할 수 있으므로 캡처 URL을 공유하지 마세요.
+
 ## 문제 해결
 
 | 현상 | 점검 |
