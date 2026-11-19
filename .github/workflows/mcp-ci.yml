@@ -6,6 +6,7 @@ on:
     paths:
       - "MCP-Deployment/**"
       - ".github/workflows/mcp-ci.yml"
+      - ".github/workflows/mcp-release.yml"
       - ".gitattributes"
       - "README.md"
   pull_request:
@@ -40,6 +41,7 @@ jobs:
         run: |
           bash -n scripts/deploy_release.sh scripts/package_release.sh
           python -m py_compile scripts/check_calls.py scripts/render_evidence.py
+          python -c "import yaml; d=yaml.safe_load(open('../.github/workflows/mcp-release.yml')); assert 'validate-and-package' in d['jobs']; assert 'github-release' in d['jobs']; assert 'deploy-oci' in d['jobs']"
       - name: Create CI evidence screenshot
         if: always()
         run: |
