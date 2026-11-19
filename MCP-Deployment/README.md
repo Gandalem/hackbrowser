@@ -51,6 +51,12 @@ sudo cat /opt/mcp-deployment/runtime/access-urls.txt
 
 HTTPS+OAuth 모드에서는 추가로 `/pocmap/mcp`, `/hackbrowser/mcp`, `/zap/mcp`를 ChatGPT에 등록할 수 있습니다. 각각 `chatgpt-pocmap`, `chatgpt-hackbrowser`, `chatgpt-zap` 공개 Client ID / PKCE S256을 사용합니다. 최초 로그인 계정은 `mcp-operator`이며 임시 비밀번호는 `/opt/mcp-deployment/runtime/private.env`의 `MCP_LOGIN_PASSWORD`에 있습니다. 로그인 후 비밀번호를 변경하세요.
 
+## HackBrowser 스크린샷 이미지 반환
+
+`browser_screenshot`은 Chromium CDP로 PNG를 캡처한 뒤 두 개의 MCP 콘텐츠 블록을 반환합니다. 첫 번째는 서버의 비공개 저장 경로·파일 크기 등 텍스트 메타데이터이고, 두 번째는 ChatGPT 등 이미지 표시 지원 MCP 클라이언트가 직접 처리할 수 있는 `image/png` 이미지 블록입니다. PNG 사본은 기본적으로 실행 계정의 `~/hackbrowser-mcp-screenshots/`에 권한 `0600`으로 저장됩니다. 이미지는 서버 밖으로 별도 URL로 공개되지 않습니다. 유효하지 않은 PNG 또는 8 MiB 초과 이미지는 거부합니다.
+
+릴리스 자동 배포에서는 기존 MCP 47개 도구 검색 및 3종 호출 검사에 더해 **실제 `browser_screenshot` 호출로 이미지 블록·PNG 서명·메타데이터를 확인**합니다. 이미지 콘텐츠를 표시하지 않는 클라이언트에서는 파일 정보만 보일 수 있습니다.
+
 ## 검증 및 관리
 
 ```bash
