@@ -6,6 +6,7 @@ Never expose CDP or the unauthenticated MCP endpoint to the public Internet.
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import os
 import re
@@ -16,12 +17,15 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 import websocket
 from mcp.server import MCPServer
+from mcp.types import ImageContent, TextContent
 
 CDP_PORT = int(os.environ.get("HACKBROWSER_CDP_PORT", "9222"))
 MCP_PORT = int(os.environ.get("HACKBROWSER_MCP_PORT", "8765"))
 CDP_HOST = "127.0.0.1"
 CDP_ROOT = f"http://{CDP_HOST}:{CDP_PORT}"
 SCREENSHOT_DIR = Path(os.environ.get("HACKBROWSER_SCREENSHOT_DIR", str(Path.home() / "hackbrowser-mcp-screenshots")))
+MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 mcp = MCPServer("HackBrowser Local CDP Bridge")
 _opener = build_opener(ProxyHandler({}))
@@ -215,18 +219,37 @@ def browser_fill(selector: str, value: str, target_id: str | None = None) -> dic
 
 
 @mcp.tool()
-def browser_screenshot(target_id: str | None = None) -> dict:
-    """Capture screenshot to a local PNG file; returns a filesystem path, not public URL."""
+def browser_screenshot(target_id: str | None = None) -> list[TextContent | ImageContent]:
+    """Capture a PNG, save a private local copy and return the image inline to the MCP client."""
     result = _cdp("Page.captureScreenshot", {"format": "png"}, target_id)
     encoded = result.get("data")
-    if not encoded:
+    if not isinstance(encoded, str) or not encoded:
         raise RuntimeError("CDP screenshot returned no image data")
+    # Avoid decoding unexpectedly huge server responses. Base64 is roughly 4/3 the binary size.
+    if len(encoded) > ((MAX_SCREENSHOT_BYTES + 2) // 3) * 4 + 4:
+        raise RuntimeError("Screenshot exceeds the 8 MiB limit")
+    try:
+        png = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise RuntimeError("CDP screenshot returned invalid base64") from exc
+    if not png.startswith(PNG_SIGNATURE):
+        raise RuntimeError("CDP screenshot is not a PNG")
+    if len(png) > MAX_SCREENSHOT_BYTES:
+        raise RuntimeError("Screenshot exceeds the 8 MiB limit")
+
     SCREENSHOT_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-    filename = f"hackbrowser-{int(time.time())}-{os.getpid()}.png"
+    filename = f"hackbrowser-{time.time_ns()}-{os.getpid()}.png"
     output = SCREENSHOT_DIR / filename
-    output.write_bytes(base64.b64decode(encoded, validate=True))
-    output.chmod(0o600)
-    return {"saved_path": str(output), "bytes": output.stat().st_size}
+    # Create a private file and never overwrite an earlier capture.
+    fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as capture:
+        capture.write(png)
+
+    metadata = {"saved_path": str(output), "bytes": len(png), "mime_type": "image/png"}
+    return [
+        TextContent(type="text", text=json.dumps(metadata)),
+        ImageContent(type="image", data=encoded, mime_type="image/png"),
+    ]
 
 
 if __name__ == "__main__":
