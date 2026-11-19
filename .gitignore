@@ -1,3 +1,16 @@
 node_modules
 dist
 .idea/
+
+# Local runtime and secrets
+.env
+.env.*
+!.env.example
+**/runtime/
+**/private.env
+*.pem
+*.key
+
+# Python cache
+__pycache__/
+*.pyc
