@@ -82,3 +82,33 @@ sudo bash /opt/mcp-deployment/uninstall.sh
 ```
 
 > 설치 스크립트는 systemd 기반 Ubuntu/Debian 호스트에서 실행합니다. 외부 MCP 접속에는 HTTPS·인증이 필요하며, 내부 CDP 포트(9222)를 공개하지 마세요.
+
+
+## 버전 태그 기반 자동 Release / OCI 업데이트
+
+`master`의 일반 커밋은 **CI 검증만** 합니다. 실제 릴리스/OCI 배포는 `vMAJOR.MINOR.PATCH` 태그를 생성하거나 해당 태그로 GitHub Release를 게시할 때 실행됩니다.
+
+```bash
+git checkout master
+git pull --ff-only origin master
+git tag -a v1.0.0 -m "MCP Deployment v1.0.0"
+git push origin v1.0.0
+```
+
+또는 GitHub의 **Releases → Draft a new release**에서 `v1.0.0` 태그를 선택/생성하고 **Publish release**를 누릅니다. 같은 태그의 이벤트가 중복 발생해도 서버에서 기록된 커밋/버전을 확인해 동일한 정상 배포를 반복하지 않습니다.
+
+자동화 작업: [MCP tagged release and OCI deployment](https://github.com/Gandalem/hackbrowser/actions/workflows/mcp-release.yml)
+
+| 작업 | 결과 |
+|---|---|
+| CI | ARM64 테스트 및 셸/파이썬 문법 검사 |
+| Package | `mcp-deployment-v1.0.0.tar.gz` + SHA-256 체크섬 생성 |
+| GitHub Release | 버전별 압축파일과 체크섬 자동 첨부 |
+| OCI CD | SSH 복사 → 체크섬 검증 → 코드 반영 → 서비스 재시작 |
+| 검증 및 증적 | MCP 47개 도구 검색, 서비스별 실제 도구 호출, CI/CD 로그·PNG 증적 |
+
+**최초 설치:** OCI에는 `MCP-Deployment/install.sh`로 MCP 스택이 먼저 설치되어 있어야 합니다. 자동 CD는 기존 서비스의 소스 코드를 업데이트하며, 기존 `runtime/`의 토큰/키/DB 데이터는 보존합니다. Python 의존성 변경은 자동 배포를 중단하고 설치 단계에서 별도 검토하도록 했습니다.
+
+**GitHub 설정:** Actions의 Repository variable `OCI_DEPLOY_ENABLED=true`, Repository secrets `OCI_SSH_HOST`, `OCI_SSH_USER`, `OCI_SSH_PRIVATE_KEY`, `OCI_SSH_KNOWN_HOSTS`가 필요합니다. 배포 전용 키와 보호된 릴리스 태그 사용을 권장합니다.
+
+**발표용 증적:** 각 Release workflow 실행의 Artifacts에서 `tagged-ci-evidence`와 `tagged-oci-deploy-evidence` ZIP을 다운로드합니다. 태그/릴리스 생성만으로 이미지 배포용 GHCR 컨테이너를 만드는 방식은 아닙니다. 다운로드 파일은 Ubuntu/Debian 설치용 소스 압축파일입니다.
