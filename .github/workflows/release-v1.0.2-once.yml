@@ -1,0 +1,35 @@
+name: Bootstrap v1.0.2 release (one-time)
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/release-v1.0.2-once.yml"
+permissions:
+  contents: write
+  actions: write
+jobs:
+  release:
+    if: github.repository == 'Gandalem/hackbrowser'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag verified v1.0.2 source and dispatch production release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: c9c1a5e8ae966a2816b0b85a11514d8ae0d1b66c
+        run: |
+          set -euo pipefail
+          git fetch origin master --tags
+          git merge-base --is-ancestor "$TARGET_SHA" origin/master
+          test "$(git cat-file -t "$TARGET_SHA")" = commit
+          if git ls-remote --exit-code --tags origin refs/tags/v1.0.2 >/dev/null 2>&1; then
+            echo "v1.0.2 already exists; refusing to retag" >&2
+            exit 1
+          fi
+          git tag v1.0.2 "$TARGET_SHA"
+          git push origin refs/tags/v1.0.2
+          # Pushes by GITHUB_TOKEN do not trigger ordinary workflows; dispatch explicitly.
+          gh workflow run mcp-release.yml --ref v1.0.2
+          echo "Triggered tagged OCI deployment for v1.0.2 at $TARGET_SHA"
