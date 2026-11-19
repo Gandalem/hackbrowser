@@ -4,11 +4,23 @@ set -Eeuo pipefail
 (( EUID == 0 )) || { echo "Run as root" >&2; exit 1; }
 SOURCE="$1"
 SHA="$2"
+VERSION="${3:-}"
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid SHA" >&2; exit 1; }
+if [[ -n "$VERSION" && ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+  echo "Invalid release version" >&2; exit 1
+fi
 ROOT="/opt/mcp-deployment"
 [[ -f "$ROOT/runtime/private.env" && -d "$ROOT/runtime/venv-hackbrowser" ]] || {
   echo "Initial installation required before CI/CD" >&2; exit 1;
 }
+if [[ -n "$VERSION" && -f "$ROOT/runtime/deployed-version" && -f "$ROOT/runtime/deployed-commit" ]] \
+    && [[ "$(cat "$ROOT/runtime/deployed-version")" == "$VERSION" ]] \
+    && [[ "$(cat "$ROOT/runtime/deployed-commit")" == "$SHA" ]]; then
+  echo "Release already deployed: $VERSION ($SHA); verifying services"
+  bash "$ROOT/status.sh"
+  python3 "$ROOT/scripts/check_calls.py"
+  exit 0
+fi
 for item in services scripts templates docs docker-compose.yml status.sh install.sh; do
   [[ -e "$SOURCE/$item" ]] || { echo "Missing release component: $item" >&2; exit 1; }
 done
@@ -64,7 +76,11 @@ fi
 trap - ERR
 printf '%s\n' "$SHA" > "$ROOT/runtime/deployed-commit"
 chmod 0644 "$ROOT/runtime/deployed-commit"
-echo "DEPLOYMENT PASS commit=$SHA"
+if [[ -n "$VERSION" ]]; then
+  printf '%s\n' "$VERSION" > "$ROOT/runtime/deployed-version"
+  chmod 0644 "$ROOT/runtime/deployed-version"
+fi
+echo "DEPLOYMENT PASS version=${VERSION:-unknown} commit=$SHA"
 bash "$ROOT/status.sh"
 python3 "$ROOT/scripts/check_calls.py"
 rm -rf -- "$BACKUP"
