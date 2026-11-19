@@ -2,6 +2,8 @@ name: mcp-deployment
 services:
   zap:
     image: ghcr.io/zaproxy/zaproxy:stable
+    environment:
+      ZAP_PORT: "8090"
     restart: unless-stopped
     network_mode: host
     volumes:
