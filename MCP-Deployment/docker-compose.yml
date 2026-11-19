@@ -60,6 +60,8 @@ services:
       - "127.0.0.1:8081:8080"
     networks:
       - oauth_internal
+      # A non-internal network is required for Docker to publish 127.0.0.1:8081.
+      - oauth_uplink
   caddy:
     image: caddy:2.10.2
     restart: unless-stopped
@@ -73,3 +75,5 @@ volumes:
 networks:
   oauth_internal:
     internal: true
+  # Do not connect PostgreSQL to this network. Keycloak is only exposed to the host via loopback.
+  oauth_uplink: {}

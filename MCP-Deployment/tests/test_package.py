@@ -17,7 +17,7 @@ class SourceTests(unittest.TestCase):
             ast.parse(f.read_text(), filename=str(f))
 
     def test_shell_syntax(self):
-        for f in ["install.sh", "uninstall.sh", "status.sh", "renew-share.sh"]:
+        for f in ["install.sh", "uninstall.sh", "status.sh", "renew-share.sh", "scripts/deploy_release.sh"]:
             subprocess.run(["bash", "-n", str(ROOT / f)], check=True)
 
     def test_no_runtime_credentials_bundled(self):
@@ -58,6 +58,24 @@ class SourceTests(unittest.TestCase):
         data = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
         self.assertEqual(set(data["services"]), {"zap", "keycloak", "postgres", "caddy"})
         self.assertEqual(data["services"]["zap"]["network_mode"], "host")
+
+    def test_keycloak_loopback_port_requires_non_internal_uplink(self):
+        import yaml
+        data = yaml.safe_load((ROOT / "docker-compose.yml").read_text())
+        networks = data["networks"]
+        keycloak = data["services"]["keycloak"]
+        postgres = data["services"]["postgres"]
+        self.assertTrue(networks["oauth_internal"]["internal"])
+        self.assertFalse(networks["oauth_uplink"].get("internal", False))
+        self.assertEqual(postgres["networks"], ["oauth_internal"])
+        self.assertNotIn("ports", postgres)
+        self.assertIn("oauth_internal", keycloak["networks"])
+        self.assertIn("oauth_uplink", keycloak["networks"])
+        self.assertIn("127.0.0.1:8081:8080", keycloak["ports"])
+        # The tagged release deployer must apply Compose network changes to
+        # already running OAuth installations, not only update source files.
+        deployer = (ROOT / "scripts/deploy_release.sh").read_text()
+        self.assertIn("--profile oauth up -d postgres keycloak", deployer)
 
 
 if __name__ == "__main__":

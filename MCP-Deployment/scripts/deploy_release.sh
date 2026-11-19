@@ -57,10 +57,14 @@ cp "$SOURCE/install.sh" "$ROOT/install.sh"
 chmod 0755 "$ROOT/services/hackbrowser/start_chromium_headless.sh"
 "$ROOT/runtime/venv-hackbrowser/bin/python" -m py_compile "$ROOT/services/hackbrowser/server.py"
 systemctl restart mcpstack-hackbrowser.service mcpstack-share.service
-if systemctl is-enabled --quiet mcpstack-oauth.service; then
+docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" up -d zap caddy
+# The release must apply updated Compose networking to active OAuth installations.
+# Updating the file alone leaves the old internal-only Keycloak container running.
+if grep -q '^ENABLE_OAUTH=1$' "$ROOT/runtime/private.env"; then
+  docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" --profile oauth up -d postgres keycloak
+  systemctl enable --now mcpstack-oauth.service
   systemctl restart mcpstack-oauth.service
 fi
-docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" up -d zap caddy
 healthy=0
 for attempt in $(seq 1 18); do
   if bash "$ROOT/status.sh" >/dev/null 2>&1 && python3 "$ROOT/scripts/check_calls.py" >/dev/null 2>&1; then
