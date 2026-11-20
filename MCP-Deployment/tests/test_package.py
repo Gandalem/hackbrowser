@@ -52,7 +52,7 @@ class SourceTests(unittest.TestCase):
         self.assertIn('"$BACKUP/runtime/caddy/Caddyfile"', script)
         self.assertLess(
             script.index('python3 "$ROOT/scripts/render_config.py"'),
-            script.index('systemctl restart mcpstack-chromium.service'),
+            script.rindex('bash "$ROOT/scripts/configure_gui_chromium.sh"'),
         )
         self.assertLess(
             script.index('caddy caddy validate --config /etc/caddy/Caddyfile'),
