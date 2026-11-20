@@ -103,7 +103,7 @@ jobs:
               old = server.browser_observe(target_id=tid, max_elements=20)
               child_old = next(e for e in old["elements"] if e["name"] == "Expand")
               server._evaluate(
-                  "document.querySelector('#child').srcdoc = '<button aria-label=\\"Expand\\">Expand</button>'",
+                  "document.querySelector('#child').srcdoc = " + json.dumps('<button aria-label="Expand">Expand</button>'),
                   tid
               )
               time.sleep(.5)
