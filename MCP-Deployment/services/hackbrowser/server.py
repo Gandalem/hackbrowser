@@ -23,9 +23,9 @@ from mcp.server import MCPServer
 from mcp.server.apps import Apps
 from mcp.types import ImageContent, TextContent
 
-from handoff import ManualHandoff
+from handoff import manual_handoff as _manual_handoff
 
-_manual_handoff = ManualHandoff()
+_handoff_input_local = threading.local()
 
 CDP_PORT = 9223
 MCP_PORT = int(os.environ.get("HACKBROWSER_MCP_PORT", "8765"))
@@ -102,8 +102,14 @@ def _target(target_id: str | None) -> dict:
 
 
 def _cdp(method: str, params: dict | None = None, target_id: str | None = None) -> dict:
-    if method not in {"Runtime.evaluate", "Page.captureScreenshot"}:
-        _manual_handoff.assert_ai_allowed()
+    with _manual_handoff.lock:
+        if (method not in {"Runtime.evaluate", "Page.captureScreenshot"} and
+                not getattr(_handoff_input_local, "user_authorized", False)):
+            _manual_handoff.assert_ai_allowed()
+        return _cdp_raw(method, params, target_id)
+
+
+def _cdp_raw(method: str, params: dict | None = None, target_id: str | None = None) -> dict:
     target = _target(target_id)
     ws_url = target["webSocketDebuggerUrl"]
     parsed = urlsplit(ws_url)
@@ -573,17 +579,21 @@ def browser_handoff_input(control_token: str, target_id: str, action: str,
         )
         if live_viewport != viewport:
             raise ValueError("Viewport changed; end takeover and recapture")
-        if action == "click":
-            if not (0 <= x < viewport["width"] and 0 <= y < viewport["height"]):
-                raise ValueError("Click must be within the GUI viewport")
-            _click_at(target_id, x, y)
-        else:
-            delta = pixels if action == "scroll_down" else -pixels
-            _cdp("Input.dispatchMouseEvent", {
-                "type": "mouseWheel",
-                "x": viewport["width"] // 2, "y": viewport["height"] // 2,
-                "deltaX": 0, "deltaY": delta,
-            }, target_id)
+        _handoff_input_local.user_authorized = True
+        try:
+            if action == "click":
+                if not (0 <= x < viewport["width"] and 0 <= y < viewport["height"]):
+                    raise ValueError("Click must be within the GUI viewport")
+                _click_at(target_id, x, y)
+            else:
+                delta = pixels if action == "scroll_down" else -pixels
+                _cdp("Input.dispatchMouseEvent", {
+                    "type": "mouseWheel",
+                    "x": viewport["width"] // 2, "y": viewport["height"] // 2,
+                    "deltaX": 0, "deltaY": delta,
+                }, target_id)
+        finally:
+            _handoff_input_local.user_authorized = False
         return {"ok": True, "action": action, "target_id": target_id,
                 "message": "User input sent once. Refresh the screenshot to confirm."}
 
