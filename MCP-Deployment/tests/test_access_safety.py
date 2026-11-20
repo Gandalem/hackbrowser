@@ -1,6 +1,5 @@
 """Access safety regression tests: no denial evasion or unbounded retries."""
 import importlib.util
-import json
 from pathlib import Path
 import unittest
 from unittest import mock
