@@ -1,4 +1,4 @@
-"""Read-only discovery and explicit browser actions over a local Electron CDP endpoint.
+"""Browser discovery and explicit actions over the local GUI Chromium CDP endpoint.
 
 This is a sidecar for hackbrowser/hackbrowser, not a modification of its old code.
 Never expose CDP or the unauthenticated MCP endpoint to the public Internet.
@@ -20,7 +20,7 @@ from mcp.server import MCPServer
 from mcp.server.apps import Apps
 from mcp.types import ImageContent, TextContent
 
-CDP_PORT = int(os.environ.get("HACKBROWSER_CDP_PORT", "9222"))
+CDP_PORT = 9223
 MCP_PORT = int(os.environ.get("HACKBROWSER_MCP_PORT", "8765"))
 CDP_HOST = "127.0.0.1"
 CDP_ROOT = f"http://{CDP_HOST}:{CDP_PORT}"
@@ -55,7 +55,7 @@ def _targets() -> list[dict]:
     except OSError as exc:
         raise RuntimeError(
             f"HackBrowser CDP unavailable on {CDP_ROOT}. "
-            "Start HackBrowser with --remote-debugging-port=9222. "
+            "Start GUI Chromium with --remote-debugging-port=9223. "
             f"Details: {exc}"
         ) from exc
     try:
@@ -86,7 +86,7 @@ def _target(target_id: str | None) -> dict:
         if str(t.get("url", "")).startswith(("http://", "https://", "about:blank"))
     ]
     if not visible:
-        raise RuntimeError("No external web page target. Open a page in HackBrowser and call browser_tabs().")
+        raise RuntimeError("No external web page target. Open a page in GUI Chromium and call browser_tabs().")
     return visible[0]
 
 
