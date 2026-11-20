@@ -50,7 +50,7 @@ class SoakMetricsTests(unittest.TestCase):
     def test_available_memory_and_cpu(self):
         with tempfile.TemporaryDirectory() as tmp:
             info = Path(tmp) / "meminfo"
-            info.write_text("MemTotal: 16384 kB\\nMemAvailable: 2048 kB\\n")
+            info.write_text("MemTotal: 16384 kB\nMemAvailable: 2048 kB\n")
             self.assertEqual(metrics.available_memory_mib(info), 2.0)
         self.assertEqual(metrics.process_cpu_percent(0, metrics.CLOCK_TICKS, 1), 100.0)
         with self.assertRaises(ValueError):
