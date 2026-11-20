@@ -60,7 +60,8 @@
       <p class="manual-note">화면 갱신은 선택 사항이며 4초 간격으로만 실행합니다. 직접 조작 중에는 화면을 클릭하거나 스크롤할 수 있습니다. 계정·결제·인증 정보 입력은 지원하지 않습니다. 현재 서버는 사용자별 브라우저 세션을 분리하지 않습니다.</p>
     </section>
     <section id="verification-card" hidden aria-label="사용자 인증 입력">
-      <h2>사용자 인증이 필요합니다</h2>
+      <h2 id="verification-heading">사용자 인증이 필요합니다</h2>
+      <div id="verification-inputs">
       <p>이미지 선택형 CAPTCHA는 <strong>이미지 직접 클릭</strong>을 사용하세요. 텍스트형 CAPTCHA는 아래에 답을 입력하고 화면에서 <strong>답 입력칸</strong>과
         <strong>확인 버튼</strong> 위치를 순서대로 클릭해 지정한 후 제출할 수 있습니다.</p>
       <label for="verification-answer">인증 답변</label>
@@ -75,8 +76,9 @@
       <div class="verification-controls">
         <button type="button" id="pick-tile">이미지 직접 클릭</button>
         <button type="button" id="refresh-verification">현재 화면 새로고침</button>
-        <button type="button" id="resume-agent" hidden>인증 완료 · AI 작업 계속</button>
       </div>
+      </div>
+      <button type="button" id="resume-agent" hidden>인증 확인 · AI 작업 계속</button>
       <p id="verification-status" role="status" aria-live="polite"></p>
     </section>
   </main>
@@ -103,6 +105,8 @@
     let liveBusy = false;
     const details = document.getElementById("details");
     const verificationCard = document.getElementById("verification-card");
+    const verificationInputs = document.getElementById("verification-inputs");
+    const verificationHeading = document.getElementById("verification-heading");
     const verificationAnswer = document.getElementById("verification-answer");
     const verificationPositions = document.getElementById("verification-positions");
     const verificationStatus = document.getElementById("verification-status");
@@ -203,23 +207,32 @@
           !Number.isInteger(value.viewport?.width) ||
           !Number.isInteger(value.viewport?.height)) {
         activeVerification = null;
-        verificationCard.hidden = true;
+        picking = null;
         preview.classList.remove("verification-active");
-        resumeAgent.hidden = metadata?.verification_status !== "completed";
-        if (metadata?.verification_status === "completed") {
-          verificationCard.hidden = false;
-          verificationStatus.textContent = "reCAPTCHA 응답 토큰이 확인되었습니다. 다음 단계로 진행할 수 있습니다.";
-          if (autoResumeOnConfirmed) void continueAgent();
-        } else if (pausedWorkflowId || lastVerificationTarget) {
-          verificationCard.hidden = false;
-          resumeAgent.hidden = false;
-          verificationStatus.textContent = "인증 화면이 보이지 않습니다. 현재 페이지가 정상인지 확인한 뒤, 보류된 작업을 재개할 수 있습니다.";
-        }
+        verificationInputs.hidden = true;
+        const completed = metadata?.verification_status === "completed";
+        // An ordinary screenshot with a target_id is not a CAPTCHA.
+        // Show the resume-only section only for an explicitly paused workflow
+        // or a confirmed verification result.
+        const canResume = completed || !!pausedWorkflowId;
+        verificationCard.hidden = !canResume;
+        resumeAgent.hidden = !canResume;
+        verificationHeading.textContent = completed
+          ? "사용자 확인 결과"
+          : "일시정지된 AI 작업";
+        verificationStatus.textContent = completed
+          ? "reCAPTCHA 응답 토큰이 확인되었습니다. AI가 실제 페이지를 다시 확인해야 합니다."
+          : pausedWorkflowId
+            ? "현재 페이지에 인증 요청이 없습니다. AI가 페이지 상태를 확인한 뒤 보류된 작업을 재개할 수 있습니다."
+            : "";
+        if (completed && autoResumeOnConfirmed) void continueAgent();
         updateManualControls();
         return;
       }
       lastVerificationTarget = metadata.target_id || lastVerificationTarget;
       activeVerification = value;
+      verificationInputs.hidden = false;
+      verificationHeading.textContent = "사용자 인증이 필요합니다";
       resumeAgent.hidden = true;
       verificationAnswer.value = "";
       inputPoint = null;
