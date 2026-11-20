@@ -53,6 +53,11 @@
       </div>
       <p id="verification-positions" role="status">입력칸: 미선택 / 확인 버튼: 미선택</p>
       <button id="verification-submit" type="button" disabled>인증 답변 제출</button>
+      <div class="verification-controls">
+        <button type="button" id="pick-tile">이미지 직접 클릭</button>
+        <button type="button" id="refresh-verification">현재 화면 새로고침</button>
+        <button type="button" id="resume-agent" hidden>인증 완료 · AI 작업 계속</button>
+      </div>
       <p id="verification-status" role="status" aria-live="polite"></p>
     </section>
   </main>
@@ -72,11 +77,17 @@
     const verificationSubmit = document.getElementById("verification-submit");
     const pickInput = document.getElementById("pick-input");
     const pickConfirm = document.getElementById("pick-confirm");
+    const pickTile = document.getElementById("pick-tile");
+    const refreshVerification = document.getElementById("refresh-verification");
+    const resumeAgent = document.getElementById("resume-agent");
     let activeVerification = null;
     let inputPoint = null;
     let confirmPoint = null;
     let picking = null;
     let verificationSubmitting = false;
+    let lastVerificationTarget = null;
+    let continueRequested = false;
+    let autoResumeOnConfirmed = false;
     let hostInitialized = false;
     let hostSupportsDownload = null;
     let nextRequestId = 2;
@@ -148,9 +159,21 @@
         activeVerification = null;
         verificationCard.hidden = true;
         preview.classList.remove("verification-active");
+        resumeAgent.hidden = metadata?.verification_status !== "completed";
+        if (metadata?.verification_status === "completed") {
+          verificationCard.hidden = false;
+          verificationStatus.textContent = "reCAPTCHA 응답 토큰이 확인되었습니다. 다음 단계로 진행할 수 있습니다.";
+          if (autoResumeOnConfirmed) void continueAgent();
+        } else if (lastVerificationTarget) {
+          verificationCard.hidden = false;
+          resumeAgent.hidden = false;
+          verificationStatus.textContent = "인증 화면이 보이지 않습니다. 성공 여부를 확인한 후 작업을 계속할 수 있습니다.";
+        }
         return;
       }
+      lastVerificationTarget = value.target_id || lastVerificationTarget;
       activeVerification = value;
+      resumeAgent.hidden = true;
       verificationAnswer.value = "";
       inputPoint = null;
       confirmPoint = null;
@@ -185,6 +208,64 @@
       scheduleHeightReport();
     }
 
+    // Host tool calls are user-triggered. Refreshing the screenshot never
+    // submits a challenge answer or attempts to solve it.
+    async function callMcpTool(name, args) {
+      if (hostInitialized) {
+        try { return await hostRequest("tools/call", { name, arguments: args }); }
+        catch (error) {
+          if (typeof window.openai?.callTool !== "function") throw error;
+        }
+      }
+      if (typeof window.openai?.callTool === "function") {
+        return await window.openai.callTool(name, args);
+      }
+      throw new Error("이 채팅 환경에서는 MCP 도구 호출을 지원하지 않습니다.");
+    }
+
+    async function refreshCapture() {
+      const target = lastVerificationTarget;
+      const result = await callMcpTool("browser_screenshot", target ? { target_id: target } : {});
+      if (result?.isError || result?.error) throw new Error("화면 캡처를 새로 가져오지 못했습니다.");
+      renderScreenshot(result);
+    }
+
+    async function continueAgent() {
+      if (continueRequested) return;
+      continueRequested = true;
+      autoResumeOnConfirmed = false;
+      resumeAgent.disabled = true;
+      const prompt = "HackBrowser에서 사용자가 CAPTCHA 확인을 완료했습니다. 현재 GUI Chromium 탭을 browser_tabs와 browser_page_text로 확인하고, 이전에 요청한 브라우저 작업을 계속하세요. 인증 성공을 가정하지 말고 화면 상태를 검증하세요. 필요하면 다시 사용자 인증을 요청하세요.";
+      try {
+        if (typeof window.openai?.sendFollowUpMessage === "function") {
+          await window.openai.sendFollowUpMessage({ prompt });
+        } else if (hostInitialized) {
+          await hostRequest("ui/message", { role: "user", content: [{ type: "text", text: prompt }] });
+        } else {
+          throw new Error("자동 후속 메시지를 지원하지 않습니다. 채팅에서 '인증 확인 후 계속해줘'라고 입력하세요.");
+        }
+        verificationStatus.textContent = "ChatGPT에 페이지 재확인 및 작업 재개를 요청했습니다.";
+      } catch (error) {
+        continueRequested = false;
+        resumeAgent.disabled = false;
+        verificationStatus.textContent = error?.message || "작업 재개 메시지 전송 실패";
+      }
+    }
+
+    refreshVerification.addEventListener("click", async () => {
+      refreshVerification.disabled = true;
+      try { await refreshCapture(); }
+      catch (error) { verificationStatus.textContent = error?.message || "캡처 갱신 실패"; }
+      finally { refreshVerification.disabled = false; }
+    });
+    resumeAgent.addEventListener("click", () => { void continueAgent(); });
+    pickTile.addEventListener("click", () => {
+      if (!activeVerification || verificationSubmitting) return;
+      picking = "tile";
+      preview.classList.add("verification-active");
+      verificationStatus.textContent = "CAPTCHA 이미지에서 선택할 위치를 한 번 클릭하세요.";
+    });
+
     preview.addEventListener("load", scheduleHeightReport);
     pickInput.addEventListener("click", () => {
       if (!activeVerification) return;
@@ -198,7 +279,7 @@
       preview.classList.add("verification-active");
       verificationStatus.textContent = "스크린샷에서 인증 확인 버튼 위치를 클릭하세요.";
     });
-    preview.addEventListener("click", (event) => {
+    preview.addEventListener("click", async (event) => {
       if (!picking || !activeVerification) return;
       const rect = preview.getBoundingClientRect();
       const scale = Math.min(
@@ -215,6 +296,28 @@
       if (x < 0 || y < 0 || x >= activeVerification.viewport.width ||
           y >= activeVerification.viewport.height) {
         verificationStatus.textContent = "이미지 내부의 위치를 클릭하세요.";
+        return;
+      }
+      if (picking === "tile") {
+        picking = null;
+        preview.classList.remove("verification-active");
+        verificationSubmitting = true;
+        updateVerificationControls();
+        verificationStatus.textContent = "선택한 위치를 GUI Chromium에 전달 중입니다...";
+        try {
+          const result = await callMcpTool("browser_verification_click", {
+            verification_id: activeVerification.id, x, y,
+          });
+          if (result?.isError || result?.error) throw new Error("선택 위치를 전달하지 못했습니다.");
+          autoResumeOnConfirmed = true;
+          await refreshCapture();
+        } catch (error) {
+          verificationStatus.textContent = error?.message || "클릭 실패: 캡처를 갱신하세요.";
+        } finally {
+          verificationSubmitting = false;
+          updateVerificationControls();
+          scheduleHeightReport();
+        }
         return;
       }
       if (picking === "input") inputPoint = { x, y };
@@ -244,21 +347,7 @@
       };
       // The answer is sent only after an explicit click, never by an effect.
       try {
-        let result;
-        if (hostInitialized) {
-          try {
-            result = await hostRequest("tools/call", {
-              name: "browser_submit_verification", arguments: args,
-            });
-          } catch (err) {
-            if (typeof window.openai?.callTool !== "function") throw err;
-            result = await window.openai.callTool("browser_submit_verification", args);
-          }
-        } else if (typeof window.openai?.callTool === "function") {
-          result = await window.openai.callTool("browser_submit_verification", args);
-        } else {
-          throw new Error("이 채팅 환경에서는 MCP 도구 직접 호출을 지원하지 않습니다.");
-        }
+        const result = await callMcpTool("browser_submit_verification", args);
         if (result?.isError || result?.error) {
           throw new Error("브라우저가 제출을 거부했습니다. 새 캡처를 진행하세요.");
         }
@@ -266,8 +355,9 @@
         // whether the human answer was accepted by the target website.
         verificationAnswer.value = "";
         activeVerification = null;
-        verificationStatus.textContent =
-          "답변을 한 번 제출했습니다. 잠시 후 ChatGPT에서 페이지 상태를 다시 확인하세요.";
+        verificationStatus.textContent = "답변을 한 번 제출했습니다. 인증 결과를 확인합니다.";
+        autoResumeOnConfirmed = true;
+        await refreshCapture();
       } catch (error) {
         verificationAnswer.value = "";
         activeVerification = null;
