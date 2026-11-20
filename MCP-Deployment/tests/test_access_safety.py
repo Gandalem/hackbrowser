@@ -52,6 +52,16 @@ class AccessSafetyTests(unittest.TestCase):
             # The restricted Naver Shopping origin doesn't block unrelated sites.
             server._pace_navigation("example.com")
 
+    def test_scroll_still_obeys_site_denial_without_navigation_delay(self):
+        with mock.patch.object(server, "_target", return_value={
+            "id": "tab", "url": "https://shopping.naver.com/ns/home",
+        }), mock.patch.object(server, "_evaluate") as evaluate:
+            server._record_restriction(
+                "https://search.shopping.naver.com/ns/search?query=test")
+            with self.assertRaisesRegex(RuntimeError, "접속 제한"):
+                server.browser_scroll(direction="down", pixels=100)
+            evaluate.assert_not_called()
+
     def test_nav_rate_limited_with_no_automatic_retries(self):
         clock = [100.0]
         def fake_sleep(seconds):
