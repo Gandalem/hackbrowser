@@ -116,6 +116,38 @@ class ServerManualToolTests(unittest.TestCase):
         self.assertTrue(server.browser_handoff_end(session["control_token"])["ok"])
         self.state.assert_ai_allowed()
 
+    def test_mutating_mcp_tools_return_explanatory_pause_results(self):
+        self._begin()
+        with mock.patch.object(server, "_gui_action") as gui, \
+             mock.patch.object(server, "_cdp") as cdp:
+            for name, invoke in (
+                ("click", lambda: server.browser_click("#link", target_id="tab")),
+                ("scroll", lambda: server.browser_scroll("down", 100, target_id="tab")),
+                ("navigate", lambda: server.browser_navigate(
+                    "https://example.org/other", target_id="tab")),
+                ("keypress", lambda: server.browser_keypress("Enter", target_id="tab")),
+                ("act", lambda: server.browser_act(
+                    "snapshot-12345678", "e1", "click", target_id="tab")),
+            ):
+                with self.subTest(tool=name):
+                    result = invoke()
+                    self.assertFalse(result["ok"])
+                    self.assertEqual(result["error_code"], "manual_control_active")
+                    self.assertIn("manual browser control", result["error"])
+                    self.assertEqual(result["action_required"], "browser_handoff_status")
+                    self.assertNotIn("control_token", result)
+            gui.assert_not_called()
+            cdp.assert_not_called()
+
+    def test_normal_mcp_tool_not_blocked_when_no_handoff(self):
+        with mock.patch.object(server, "_target", return_value=TARGET), \
+             mock.patch.object(server, "_gui_action", return_value={"ok": True}) as gui, \
+             mock.patch.object(server, "_pace_navigation"):
+            result = server.browser_click("#link", target_id="tab")
+        self.assertTrue(result["ok"])
+        gui.assert_called_once()
+
+
     def test_ai_cdp_mutation_rejected_during_takeover(self):
         session = self._begin()
         with mock.patch.object(server, "_cdp_raw") as raw:

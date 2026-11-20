@@ -13,7 +13,7 @@ assert.ok(!html.includes("/captures/"), "obsolete public endpoint remains");
 const listeners = new Map();
 const elements = new Map();
 for (const name of ["preview", "status", "download", "details",
-                   "verification-card", "verification-answer",
+                   "verification-card", "verification-inputs", "verification-heading", "verification-answer",
                    "verification-positions", "verification-status",
                    "verification-submit", "pick-input", "pick-confirm",
                    "pick-tile", "refresh-verification", "resume-agent",
@@ -103,6 +103,45 @@ window.onMessage({
   },
 });
 assert.equal(elements.get("download").disabled, false);
+// A screenshot has a target ID but does not imply a CAPTCHA or paused workflow.
+assert.equal(elements.get("verification-card").hidden, true,
+  "normal page must not display the CAPTCHA card");
+assert.equal(elements.get("resume-agent").hidden, true,
+  "normal page must not show a fake verification-resume button");
+assert.equal(elements.get("verification-inputs").hidden, true,
+  "normal page must keep CAPTCHA form hidden");
+// When a workflow is paused without an active CAPTCHA, show only the
+// resume control and explanatory status, not the challenge form.
+window.onMessage({
+  source: parent, data: { jsonrpc: "2.0",
+    method: "ui/notifications/tool-result",
+    params: { content: [
+      {type: "text", text: JSON.stringify({
+        bytes: png.length, mime_type: "image/png", target_id: "gui-tab",
+        paused_workflow: {workflow_id: "demo-paused"},
+      })},
+      {type: "image", mimeType: "image/png", data: png.toString("base64")},
+    ]},
+  },
+});
+assert.equal(elements.get("verification-card").hidden, false);
+assert.equal(elements.get("verification-inputs").hidden, true);
+assert.equal(elements.get("resume-agent").hidden, false);
+assert.match(elements.get("verification-heading").textContent, /일시정지/);
+// An ordinary capture after the pause has cleared hides resume again.
+window.onMessage({
+  source: parent, data: { jsonrpc: "2.0",
+    method: "ui/notifications/tool-result",
+    params: { content: [
+      {type: "text", text: JSON.stringify({
+        bytes: png.length, mime_type: "image/png", target_id: "gui-tab",
+      })},
+      {type: "image", mimeType: "image/png", data: png.toString("base64")},
+    ]},
+  },
+});
+assert.equal(elements.get("verification-card").hidden, true);
+assert.equal(elements.get("resume-agent").hidden, true);
 await elements.get("download").click();
 const request = sent.find(message => message.method === "ui/download-file");
 assert.ok(request, "host download request not issued");
@@ -148,6 +187,8 @@ window.onMessage({
   },
 });
 assert.equal(elements.get("verification-card").hidden, false);
+assert.equal(elements.get("verification-inputs").hidden, false);
+assert.equal(elements.get("resume-agent").hidden, true);
 elements.get("verification-answer").value = "1234";
 elements.get("verification-answer").input();
 elements.get("pick-input").click();
