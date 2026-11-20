@@ -286,10 +286,13 @@ def main():
         while time.monotonic() < deadline:
             if stage_process.poll() is not None:
                 raise RuntimeError("Staging OAuth gateway exited before health check")
-            status, _ = request(
-                f"http://127.0.0.1:{gateway_port}/internal-health", timeout=2)
-            if status == 200:
-                break
+            try:
+                status, _ = request(
+                    f"http://127.0.0.1:{gateway_port}/internal-health", timeout=2)
+                if status == 200:
+                    break
+            except (URLError, TimeoutError):
+                pass
             time.sleep(0.2)
         else:
             raise RuntimeError("Staging OAuth gateway startup timed out")
@@ -350,17 +353,35 @@ def main():
                     stage_process.wait()
         if stage_root is not None:
             shutil.rmtree(stage_root, ignore_errors=False)
-        for user_uuid in reversed(created_users):
+        cleanup_ids = list(created_users)
+        for username in users:
+            try:
+                status, matches = admin(
+                    "/users?username=" + quote(username) + "&exact=true")
+                if status == 200:
+                    cleanup_ids.extend(item["id"] for item in matches
+                                       if item.get("username") == username)
+            except (OSError, RuntimeError):
+                print("[WARN] Could not recheck temporary users", file=sys.stderr)
+        for user_uuid in reversed(list(dict.fromkeys(cleanup_ids))):
             try:
                 status, _ = admin("/users/" + quote(user_uuid), "DELETE")
-                if status != 204:
+                if status not in (204, 404):
                     print("[WARN] Test user cleanup failed (HTTP status)", file=sys.stderr)
             except (OSError, RuntimeError):
                 print("[WARN] Test user cleanup failed", file=sys.stderr)
+        if not client_uuid:
+            try:
+                status, clients = admin("/clients?clientId=" + quote(client_id))
+                if status == 200:
+                    match = next((c for c in clients if c.get("clientId") == client_id), None)
+                    client_uuid = match["id"] if match else None
+            except (OSError, RuntimeError):
+                print("[WARN] Could not recheck temporary client", file=sys.stderr)
         if client_uuid:
             try:
                 status, _ = admin("/clients/" + quote(client_uuid), "DELETE")
-                if status != 204:
+                if status not in (204, 404):
                     print("[WARN] Test client cleanup failed (HTTP status)", file=sys.stderr)
             except (OSError, RuntimeError):
                 print("[WARN] Test client cleanup failed", file=sys.stderr)
