@@ -1,0 +1,31 @@
+name: One-time Playwright GUI browser release v1.0.15
+on:
+  push:
+    branches: [master]
+    paths: [".github/workflows/bootstrap-v1.0.15.yml"]
+permissions:
+  actions: write
+  contents: write
+jobs:
+  create-tag-and-dispatch:
+    if: github.repository == 'Gandalem/hackbrowser'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create immutable v1.0.15 and trigger GUI release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/master'
+          git merge-base --is-ancestor a7aad7213ab5abacbc7f89b07808949dc4138cb7 HEAD
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.15" >/dev/null 2>&1; then
+            echo 'Release tag v1.0.15 already exists. Refusing to retag.' >&2
+            exit 1
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref='refs/tags/v1.0.15' -f sha="$GITHUB_SHA" >/dev/null
+          gh workflow run mcp-release.yml --ref v1.0.15
+          echo 'Tagged Playwright GUI release dispatched.'
