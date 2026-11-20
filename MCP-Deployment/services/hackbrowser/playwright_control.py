@@ -297,20 +297,24 @@ class _GuiWorker:
                             cdp_root, timeout=CONNECT_TIMEOUT_MS
                         )
                         self.started += 1
-                    if action in {"observe", "act_ref"}:
-                        page = _find_page(browser.contexts[0], selected)
-                        if action == "observe":
-                            value = self.semantic.observe(
-                                page, selected["id"], args["max_elements"],
-                            )
+                    from handoff import manual_handoff
+                    with manual_handoff.lock:
+                        if action != "observe":
+                            manual_handoff.assert_ai_allowed()
+                        if action in {"observe", "act_ref"}:
+                            page = _find_page(browser.contexts[0], selected)
+                            if action == "observe":
+                                value = self.semantic.observe(
+                                    page, selected["id"], args["max_elements"],
+                                )
+                            else:
+                                value = self.semantic.act(
+                                    page, selected["id"], args["snapshot_id"],
+                                    args["ref"], args["interaction"], args.get("text"),
+                                )
                         else:
-                            value = self.semantic.act(
-                                page, selected["id"], args["snapshot_id"],
-                                args["ref"], args["interaction"], args.get("text"),
-                            )
-                    else:
-                        self.semantic.invalidate()
-                        value = _run_connected(browser, selected, action, args, targets)
+                            self.semantic.invalidate()
+                            value = _run_connected(browser, selected, action, args, targets)
                     future.set_result(value)
                 except Exception as exc:
                     # Drop a stale transport, but DO NOT retry this action.
