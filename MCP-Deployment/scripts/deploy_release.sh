@@ -55,8 +55,11 @@ cp "$SOURCE/docker-compose.yml" "$ROOT/docker-compose.yml"
 cp "$SOURCE/status.sh" "$ROOT/status.sh"
 cp "$SOURCE/install.sh" "$ROOT/install.sh"
 chmod 0755 "$ROOT/services/hackbrowser/start_chromium_headless.sh"
+# Upgrade already-running VMs without reinstalling or resetting MCP credentials.
+# Install/check Hangul fonts before restarting the renderer so Chrome sees them.
+bash "$ROOT/scripts/ensure_korean_fonts.sh"
 "$ROOT/runtime/venv-hackbrowser/bin/python" -m py_compile "$ROOT/services/hackbrowser/server.py"
-systemctl restart mcpstack-hackbrowser.service mcpstack-share.service
+systemctl restart mcpstack-chromium.service mcpstack-hackbrowser.service mcpstack-share.service
 docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" up -d zap caddy
 # The release must apply updated Compose networking to active OAuth installations.
 # Updating the file alone leaves the old internal-only Keycloak container running.
