@@ -246,7 +246,7 @@ python3 -m venv "$ROOT/runtime/venv-pocmap"
 python3 -m venv "$ROOT/runtime/venv-hackbrowser"
 "$ROOT/runtime/venv-hackbrowser/bin/python" -m pip install --disable-pip-version-check -r "$ROOT/services/hackbrowser/requirements.txt"
 python3 -m venv "$ROOT/runtime/venv-gateway"
-"$ROOT/runtime/venv-gateway/bin/python" -m pip install --disable-pip-version-check 'aiohttp>=3.12,<4' 'PyJWT[crypto]>=2.10,<3'
+"$ROOT/runtime/venv-gateway/bin/python" -m pip install --disable-pip-version-check 'aiohttp>=3.12,<4' 'PyJWT[crypto]>=2.10,<3' 'websocket-client>=1.8,<2'
 "$ROOT/runtime/venv-gateway/bin/python" -m py_compile "$ROOT/services/gateway/"*.py
 "$ROOT/runtime/venv-hackbrowser/bin/python" -m py_compile \
   "$ROOT/services/hackbrowser/server.py" "$ROOT/services/hackbrowser/playwright_control.py"
