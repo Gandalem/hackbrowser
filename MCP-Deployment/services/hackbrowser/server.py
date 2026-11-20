@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import importlib
 import json
 import os
 import secrets
@@ -275,7 +276,9 @@ def _pace_navigation(host: str) -> None:
 # This manager holds no passwords, CAPTCHA answers or persistent browser profile.
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-from workflow_engine import WorkflowManager, safe_public_url
+_workflow_module = importlib.import_module('workflow_engine')
+WorkflowManager = _workflow_module.WorkflowManager
+safe_public_url = _workflow_module.safe_public_url
 
 
 def _workflow_gate(target_id: str) -> dict:
