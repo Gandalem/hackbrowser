@@ -1,0 +1,37 @@
+name: Diagnose v1.0.5 MCP rollback (one-time)
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/diagnose-v1.0.5-once.yml'
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    if: github.repository == 'Gandalem/hackbrowser'
+    runs-on: ubuntu-24.04
+    environment: oci-production
+    steps:
+      - name: Inspect failed HackBrowser restart (read-only)
+        env:
+          DEPLOY_HOST: ${{ secrets.OCI_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.OCI_SSH_USER }}
+          DEPLOY_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST_KEYS: ${{ secrets.OCI_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER" && test -n "$DEPLOY_KEY" && test -n "$DEPLOY_HOST_KEYS"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > "$HOME/.ssh/id_ci_diag"
+          printf '%s\n' "$DEPLOY_HOST_KEYS" | tr -d '\r' > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ci_diag" "$HOME/.ssh/known_hosts"
+          trap 'rm -f "$HOME/.ssh/id_ci_diag"' EXIT
+          ssh -i "$HOME/.ssh/id_ci_diag" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo "=== Active service state (after rollback) ==="
+          systemctl is-active mcpstack-hackbrowser.service || true
+          echo "=== Error categories around v1.0.5 restart ==="
+          sudo -n journalctl -u mcpstack-hackbrowser.service --since '2026-11-20 00:57:00 UTC' --until '2026-11-20 01:02:00 UTC' --no-pager -o cat |
+            python3 -c 'import sys,re; lines=sys.stdin.readlines(); pats=(r"Traceback",r"Error",r"Exception",r"invalid",r"unknown",r"Missing",r"TypeError",r"AttributeError",r"ImportError"); out=[line[:280].strip() for line in lines if any(re.search(p,line,re.I) for p in pats)]; print("\n".join(out[-35:]) if out else "No classified error lines found")'
+          REMOTE
