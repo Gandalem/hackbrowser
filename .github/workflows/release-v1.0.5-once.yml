@@ -1,0 +1,34 @@
+name: Bootstrap v1.0.5 release (one-time)
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/release-v1.0.5-once.yml"
+permissions:
+  contents: write
+  actions: write
+jobs:
+  release:
+    if: github.repository == 'Gandalem/hackbrowser'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag verified v1.0.5 source and dispatch release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: 1e990e623f5dd9d3ba4dddc28810989cdac3ccab
+        run: |
+          set -euo pipefail
+          git fetch origin master --tags
+          git merge-base --is-ancestor "$TARGET_SHA" origin/master
+          test "$(git cat-file -t "$TARGET_SHA")" = commit
+          if git ls-remote --exit-code --tags origin refs/tags/v1.0.5 >/dev/null 2>&1; then
+            echo "v1.0.5 already exists; refusing to retag" >&2
+            exit 1
+          fi
+          git tag v1.0.5 "$TARGET_SHA"
+          git push origin refs/tags/v1.0.5
+          gh workflow run mcp-release.yml --repo "$GITHUB_REPOSITORY" --ref v1.0.5
+          echo "Created v1.0.5 at $TARGET_SHA and dispatched release"
