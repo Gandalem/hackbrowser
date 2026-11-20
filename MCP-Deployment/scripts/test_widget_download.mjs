@@ -15,7 +15,8 @@ const elements = new Map();
 for (const name of ["preview", "status", "download", "details",
                    "verification-card", "verification-answer",
                    "verification-positions", "verification-status",
-                   "verification-submit", "pick-input", "pick-confirm"]) {
+                   "verification-submit", "pick-input", "pick-confirm",
+                   "pick-tile", "refresh-verification", "resume-agent"]) {
   elements.set(name, {
     textContent: "", value: "",
     hidden: name === "verification-card",
