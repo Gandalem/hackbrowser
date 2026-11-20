@@ -595,7 +595,22 @@ def browser_wait_for(selector: str | None = None, text: str | None = None,
 @mcp.tool(meta={"ui": {"resourceUri": SCREENSHOT_UI_URI}, "openai/outputTemplate": SCREENSHOT_UI_URI})
 def browser_screenshot(target_id: str | None = None) -> list[TextContent | ImageContent]:
     """Capture a PNG and return it directly to the MCP Apps inline viewer."""
-    result = _cdp("Page.captureScreenshot", {"format": "png"}, target_id)
+    # Capture is read-only. Retry at most once on a transient CDP transport
+    # failure; never retry page clicks or verification submissions.
+    try:
+        result = _cdp("Page.captureScreenshot", {"format": "png"}, target_id)
+    except (TimeoutError, RuntimeError) as exc:
+        message = str(exc)
+        if not (isinstance(exc, TimeoutError) or "CDP transport error:" in message
+                or "did not respond in time" in message):
+            raise
+        try:
+            result = _cdp("Page.captureScreenshot", {"format": "png"}, target_id)
+        except Exception as retry_error:
+            raise RuntimeError(
+                "Screenshot failed after one read-only transport retry: "
+                + type(retry_error).__name__
+            ) from retry_error
     encoded = result.get("data")
     if not isinstance(encoded, str) or not encoded:
         raise RuntimeError("CDP screenshot returned no image data")
