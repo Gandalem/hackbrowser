@@ -45,11 +45,15 @@ def safe_public_url(url: str) -> bool:
     try:
         parts = urlsplit(url)
         host = (parts.hostname or "").lower()
-        if parts.scheme not in {"https", "http"} or not host:
+        if parts.scheme != "https" or not host:
+            return False
+        if parts.port not in {None, 443}:
             return False
         if parts.username or parts.password or parts.fragment:
             return False
-        if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
+        if (host in {"localhost", "localhost.localdomain"} or
+                host.endswith((".local", ".internal", ".lan", ".home",
+                               ".localhost", ".test", ".invalid", ".onion", ".arpa"))):
             return False
         try:
             if not ipaddress.ip_address(host).is_global:
@@ -172,6 +176,11 @@ class WorkflowManager:
             raise ValueError("Select a live browser target_id")
         with self.lock:
             self._cleanup()
+            # Two automation plans must not race on the same GUI tab.
+            if any(t["target_id"] == target_id and
+                   t["status"] not in {"finished", "stopped"}
+                   for t in self.workflows.values()):
+                raise RuntimeError("A workflow already controls this tab")
             if len(self.workflows) >= MAX_WORKFLOWS:
                 raise RuntimeError("Too many active workflows; finish or let them expire")
             task_id = secrets.token_urlsafe(24)
@@ -256,6 +265,13 @@ class WorkflowManager:
                         last_error="Action result was not confirmed",
                     )
                     break
+                if (step["op"] in {"click_link", "search"} and
+                        not result.get("effect_observed")):
+                    task.update(
+                        status="stopped", reason="effect_unconfirmed",
+                        last_error="Link/search did not produce an observable change",
+                    )
+                    break
                 next_target = result.get("next_target_id")
                 if isinstance(next_target, str) and next_target:
                     task["target_id"] = next_target
@@ -269,7 +285,24 @@ class WorkflowManager:
                     task["reason"] = "time_budget"
                     break
 
-            if task["index"] == len(task["steps"]):
+            # Check whether the LAST completed action ended at a challenge,
+            # even when there are no more steps to run in this batch.
+            if task["status"] == "yielded" and performed:
+                try:
+                    state = self.gate(task["target_id"]).get("state", "unsafe_page")
+                except Exception as exc:
+                    task.update(status="stopped", reason="gate_failed",
+                                last_error=type(exc).__name__)
+                else:
+                    if state in {"verification_required", "login_required"}:
+                        task.update(
+                            status="paused_verification" if state ==
+                            "verification_required" else "paused_login",
+                            reason=state,
+                        )
+                    elif state != "ok":
+                        task.update(status="stopped", reason=state)
+            if task["index"] == len(task["steps"]) and task["status"] == "yielded":
                 task.update(status="finished", reason=None)
             elif task["status"] == "yielded" and task["reason"] is None:
                 task["reason"] = "batch_boundary"
