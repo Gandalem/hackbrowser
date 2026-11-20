@@ -26,7 +26,10 @@ class AccessSafetyTests(unittest.TestCase):
                 "쇼핑 서비스 접속이 일시적으로 제한되었습니다."),
             "네이버의 접속 제한 또는 사용자 확인 안내가 표시됨",
         )
-        self.assertIsNotNone(server._restriction_reason(
+        self.assertIsNone(server._restriction_reason(
+            "https://search.shopping.naver.com/ns/search?query=test",
+            "NAVER Please complete the security verification."))
+        self.assertIsNotNone(server._verification_reason(
             "https://search.shopping.naver.com/ns/search?query=test",
             "NAVER Please complete the security verification."))
         self.assertIsNotNone(server._restriction_reason(
