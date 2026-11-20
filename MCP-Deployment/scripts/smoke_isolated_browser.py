@@ -109,6 +109,21 @@ def require_ok(url: str, name: str, args: dict | None = None) -> tuple[dict, dic
     return response, value
 
 
+def normalize_tabs(value: object) -> list[dict]:
+    """MCPServer wraps list-valued tool returns as {"result": [...]}.
+
+    Some clients deserialize a top-level list directly; accept both forms,
+    but refuse unknown or empty data rather than guessing a target.
+    """
+    if isinstance(value, dict):
+        value = value.get("result")
+    if (not isinstance(value, list) or not value
+            or any(not isinstance(item, dict) or not isinstance(item.get("target_id"), str)
+                   or not item["target_id"] for item in value)):
+        raise ValueError("Unexpected browser_tabs payload; expected a non-empty list of targets")
+    return value
+
+
 def wait_for_text(url: str, target_id: str, text: str) -> None:
     until = time.monotonic() + 14
     while time.monotonic() < until:
@@ -197,10 +212,13 @@ def main() -> None:
                     assert status["cdp"] == f"http://127.0.0.1:{port}"
                 print("[PASS] Both real MCP bridges connect to their own Chromium", flush=True)
 
-                _resp, a_tabs = require_ok(a_url, "browser_tabs")
-                _resp, b_tabs = require_ok(b_url, "browser_tabs")
+                _resp, a_tabs_payload = require_ok(a_url, "browser_tabs")
+                _resp, b_tabs_payload = require_ok(b_url, "browser_tabs")
+                a_tabs = normalize_tabs(a_tabs_payload)
+                b_tabs = normalize_tabs(b_tabs_payload)
                 a_target = a_tabs[0]["target_id"]
                 b_target = b_tabs[0]["target_id"]
+                print("[PASS] Both browser_tabs responses decoded", flush=True)
                 assert a_target != b_target
                 base = f"http://127.0.0.1:{server.server_address[1]}"
                 require_ok(a_url, "browser_navigate", {
