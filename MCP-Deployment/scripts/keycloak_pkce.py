@@ -94,7 +94,7 @@ def authorization_code(
         "client_id": client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
-        "scope": f"openid mcp:hackbrowser",
+        "scope": "openid mcp:hackbrowser",
         "code_challenge": s256_challenge(verifier),
         "code_challenge_method": "S256",
         "state": state,
