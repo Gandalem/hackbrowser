@@ -30,7 +30,7 @@ class AgentActionsTests(unittest.TestCase):
         self.assertEqual(cdp.call_count, 2)
         self.assertEqual(cdp.call_args_list[0].args[0], "Input.dispatchKeyEvent")
         self.assertEqual(cdp.call_args_list[0].args[1]["key"], "Enter")
-        self.assertEqual(cdp.call_args_list[0].args[1]["text"], "\\r")
+        self.assertEqual(cdp.call_args_list[0].args[1]["text"], "\r")
         self.assertEqual(cdp.call_args_list[1].args[1]["type"], "keyUp")
         with self.assertRaises(ValueError):
             server.browser_keypress("Control+L")
