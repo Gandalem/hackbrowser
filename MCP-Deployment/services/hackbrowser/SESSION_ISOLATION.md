@@ -70,6 +70,36 @@ restore existing behavior without deleting isolated user profile directories.
 - Shared persistent profiles are never automatically deleted. Account deletion
   and quota management require additional work.
 
+## OCI real Keycloak JWT staging test
+
+The PR also contains `MCP-Deployment/scripts/smoke_oauth_isolation.py`.
+Use it **from a normal account with sudo**, against the existing Keycloak
+realm after the synthetic-browser smoke test has passed:
+
+```bash
+cd ~/hb-isolation-test.nWOaei
+git pull --ff-only origin feat/isolated-browser-session-pool
+sudo /usr/bin/python3 MCP-Deployment/scripts/smoke_oauth_isolation.py
+```
+
+This integration test temporarily **creates three Keycloak test users and one
+confidential direct-grant client in the live realm**, and deletes them at exit.
+It needs root access to read `runtime/private.env`; credentials and JWTs are
+not printed. Its temporary OAuth gateway binds a distinct loopback port and
+runs with the invoking non-root account; it leaves production gateway port
+8787, CDP 9223, MCP 8765 and existing user profiles untouched.
+
+It verifies signed Keycloak JWT validation, account-specific backend routing,
+synthetic page cookies, real PNG screenshots, cross-user target/handoff denial,
+and third-account capacity rejection. The test uses the Keycloak password
+grant **only for disposable accounts**, not the interactive ChatGPT PKCE flow.
+Do not use it to verify ChatGPT authorization-code redirect behavior.
+
+Cleanup is attempted on both success and failure. Abrupt machine termination
+or SIGKILL can interrupt cleanup; if that happens, review/delete **only**
+Keycloak entities whose names begin with the generated `hb-smoke-` prefix.
+The test never deliberately alters existing Keycloak users or clients.
+
 ## Required end-to-end tests
 
 1. Two valid OAuth accounts have different CDP endpoints, tabs and screenshots.
