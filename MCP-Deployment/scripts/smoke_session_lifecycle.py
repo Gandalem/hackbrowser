@@ -32,7 +32,10 @@ class CookieSite(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         if self.path == "/set":
-            self.send_header("Set-Cookie", "lifecycle=retained; Path=/; SameSite=Lax")
+            # Session cookies are allowed to disappear on a browser restart.
+            # Use an expiring persistent cookie to test user-profile survival.
+            self.send_header("Set-Cookie",
+                             "lifecycle=retained; Max-Age=3600; Path=/; SameSite=Lax")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -73,7 +76,10 @@ def main():
                 wait_for_text(url, tab, "cookie-")
                 if "lifecycle=retained" not in cookie_value(first_port, tab):
                     raise AssertionError("Initial test cookie was not stored")
-                print("[PASS] Cookie persisted in isolated Chromium profile", flush=True)
+                print("[PASS] Persistent cookie set in isolated Chromium profile", flush=True)
+                # Chromium can write its cookie database asynchronously.
+                # Let the test-only browser flush before the idle-stop check.
+                time.sleep(2)
 
                 # The active gateway request/stream lease protects an idle browser.
                 first_session.last_used = time.monotonic() - 30
@@ -115,9 +121,27 @@ def main():
                 require_ok(next_url, "browser_navigate", {
                     "url": origin + "/read", "target_id": new_tab,
                 })
-                wait_for_text(next_url, new_tab, "cookie-present")
+                deadline = time.monotonic() + 12
+                last_page_state = "unavailable"
+                while time.monotonic() < deadline:
+                    _response, page = require_ok(
+                        next_url, "browser_page_text", {"target_id": new_tab},
+                    )
+                    text = page.get("text", "") if isinstance(page, dict) else ""
+                    if "cookie-present" in text:
+                        last_page_state = "cookie-present"
+                        break
+                    if "cookie-missing" in text:
+                        last_page_state = "cookie-missing"
+                        break
+                    time.sleep(0.25)
+                if last_page_state != "cookie-present":
+                    raise AssertionError(
+                        "Persistent cookie was not restored after browser restart "
+                        f"(test page state: {last_page_state})."
+                    )
                 if "lifecycle=retained" not in cookie_value(newer.port, new_tab):
-                    raise AssertionError("Cookie lost across browser process restart")
+                    raise AssertionError("Persistent cookie unavailable through CDP after reconnect")
                 print("[PASS] Same owner reconnects to new processes with stored cookies", flush=True)
                 manager.release(next_key)
                 print("[RESULT] OCI isolated browser idle/reconnect lifecycle smoke PASSED",
