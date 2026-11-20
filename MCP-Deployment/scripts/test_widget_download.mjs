@@ -134,5 +134,8 @@ assert.equal(request2.params.arguments.confirm_x, 600);
 assert.equal(request2.params.arguments.confirm_y, 400);
 assert.equal(elements.get("verification-answer").value, "");
 assert.equal(elements.get("verification-submit").disabled, true);
+assert.ok(html.includes("browser_verification_click"), "manual CAPTCHA tile click handler missing");
+assert.ok(html.includes("browser_screenshot"), "manual CAPTCHA screenshot refresh missing");
+assert.ok(html.includes("sendFollowUpMessage"), "resume-agent fallback missing");
 console.log("MCP Apps manual CAPTCHA card tool submission: PASS");
 console.log("MCP Apps host-mediated PNG download: PASS");
