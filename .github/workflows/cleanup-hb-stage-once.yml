@@ -31,9 +31,10 @@ jobs:
           sudo -n ss -lntp '( sport = :8766 )' || true
           for pid in $(sudo -n ss -lntp '( sport = :8766 )' | sed -nE 's/.*pid=([0-9]+).*/\\1/p'); do
             if [[ ! "$pid" =~ ^[0-9]+$ ]]; then continue; fi
-            cmdline="$(sudo -n cat "/proc/$pid/cmdline" | tr '\\0' ' ' || true)"
-            if [[ "$cmdline" == *"/tmp/hb-stage."* && "$cmdline" == *"/server.py"* ]]; then
-              echo "Stopping temporary screenshot test process on 8766"
+            owner="$(sudo -n ps -o user= -p "$pid" | tr -d ' ' || true)"
+            echo "Test port process owner: $owner"
+            if [[ "$owner" == "mcpstack" ]]; then
+              echo "Stopping mcpstack-owned temporary listener on 8766 only"
               sudo -n kill "$pid" || true
             fi
           done
