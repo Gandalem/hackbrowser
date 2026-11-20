@@ -1,0 +1,94 @@
+name: Standalone HackBrowser Docker smoke
+
+on:
+  pull_request:
+    paths:
+      - "standalone/**"
+      - "MCP-Deployment/services/hackbrowser/**"
+      - ".github/workflows/standalone-docker-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-smoke:
+    name: Linux ARM64 standalone image + live MCP/GUI smoke
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build standalone GUI Chromium MCP
+        run: docker build --pull -f standalone/Dockerfile -t hackbrowser-standalone:ci .
+      - name: Start unprivileged local-only MCP container
+        run: |
+          set -euo pipefail
+          docker run -d --name hackbrowser-ci --init \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --shm-size 512m -p 127.0.0.1:8765:8765 \
+            hackbrowser-standalone:ci
+      - name: Verify real GUI CDP and MCP discovery
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+
+          metadata = {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {},
+              "io.modelcontextprotocol/clientInfo": {
+                  "name": "hackbrowser-standalone-smoke", "version": "1.0"
+              },
+          }
+          for attempt in range(90):
+              try:
+                  request = urllib.request.Request(
+                      "http://127.0.0.1:8765/mcp",
+                      data=json.dumps({
+                          "jsonrpc": "2.0", "id": 1,
+                          "method": "tools/list",
+                          "params": {"_meta": metadata},
+                      }).encode(),
+                      headers={
+                          "Content-Type": "application/json",
+                          "Accept": "application/json, text/event-stream",
+                          "Mcp-Method": "tools/list",
+                          "MCP-Protocol-Version": "2026-07-28",
+                      },
+                  )
+                  with urllib.request.urlopen(request, timeout=5) as response:
+                      raw = response.read().decode()
+                  if raw.lstrip().startswith(("event:", "data:")):
+                      raw = next(
+                          line[5:].strip()
+                          for line in raw.splitlines() if line.startswith("data:")
+                      )
+                  body = json.loads(raw)
+                  names = {t["name"] for t in body["result"]["tools"]}
+                  assert len(names) == 22, names
+                  assert {"browser_observe", "browser_act", "browser_screenshot"} <= names
+                  print("PASS: GUI-backed standalone exposed 22 MCP tools")
+                  break
+              except Exception as error:
+                  if attempt == 89:
+                      raise RuntimeError("MCP discovery did not start") from error
+                  time.sleep(2)
+          PY
+          docker exec hackbrowser-ci curl --noproxy '*' -fsS \
+            http://127.0.0.1:9223/json/version > /tmp/hackbrowser-cdp.json
+          python - <<'PY'
+          import json
+          obj = json.load(open("/tmp/hackbrowser-cdp.json"))
+          assert "Chromium" in obj.get("Browser", "") or "Chrome" in obj.get("Browser", "")
+          assert "HeadlessChrome" not in obj.get("Browser", "")
+          print("PASS: live GUI Chromium CDP 9223")
+          PY
+      - name: Show logs on failure
+        if: failure()
+        run: docker logs --tail=200 hackbrowser-ci || true
+      - name: Cleanup
+        if: always()
+        run: docker rm -f hackbrowser-ci || true

@@ -246,6 +246,14 @@ class _GuiWorker:
         self.lock = threading.Lock()
         self.thread = None
         self.started = 0
+        # Module must also load when CI imports this file directly by path.
+        import sys
+        from pathlib import Path
+        folder = str(Path(__file__).resolve().parent)
+        if folder not in sys.path:
+            sys.path.insert(0, folder)
+        from semantic_browser import SemanticBrowser
+        self.semantic = SemanticBrowser()
 
     def submit(self, cdp_root, selected, action, args, list_targets):
         result = Future()
@@ -283,17 +291,31 @@ class _GuiWorker:
                 try:
                     _validate_cdp(cdp_root)
                     if browser is None or not browser.is_connected():
-                        # Reconnect ONLY before executing a queued action,
-                        # never after an uncertain click or form submission.
+                        # Reconnect only before a new action; no blind replay.
+                        self.semantic.invalidate()
                         browser = playwright.chromium.connect_over_cdp(
                             cdp_root, timeout=CONNECT_TIMEOUT_MS
                         )
                         self.started += 1
-                    result = _run_connected(browser, selected, action, args, targets)
-                    future.set_result(result)
+                    if action in {"observe", "act_ref"}:
+                        page = _find_page(browser.contexts[0], selected)
+                        if action == "observe":
+                            value = self.semantic.observe(
+                                page, selected["id"], args["max_elements"],
+                            )
+                        else:
+                            value = self.semantic.act(
+                                page, selected["id"], args["snapshot_id"],
+                                args["ref"], args["interaction"], args.get("text"),
+                            )
+                    else:
+                        self.semantic.invalidate()
+                        value = _run_connected(browser, selected, action, args, targets)
+                    future.set_result(value)
                 except Exception as exc:
                     # Drop a stale transport, but DO NOT retry this action.
                     browser = None
+                    self.semantic.invalidate()
                     future.set_exception(exc)
                 finally:
                     self.jobs.task_done()

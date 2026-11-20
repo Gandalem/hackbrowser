@@ -614,6 +614,55 @@ def browser_elements(target_id: str | None = None, max_items: int = 30) -> dict:
 
 
 @mcp.tool()
+def browser_observe(target_id: str | None = None,
+                    max_elements: int = 35) -> dict:
+    """Observe visible controls with short-lived e1/e2 references.
+
+    Returns title, a short page text preview and ref IDs without exposing
+    CSS selectors or field values. Re-observe after page navigation or change.
+    """
+    selected = _target(target_id)
+    page_status = browser_page_text(target_id=selected["id"], max_chars=300)
+    if page_status.get("access_status") == "restricted":
+        return {"ok": False, "access_status": "restricted",
+                "reason": page_status.get("restriction_reason", "Site denied access")}
+    return _gui_action(selected, "observe", {"max_elements": max_elements})
+
+
+@mcp.tool()
+def browser_act(snapshot_id: str, ref: str, action: str,
+                text: str | None = None, target_id: str | None = None) -> dict:
+    """Click a safe navigation control or fill/submit a non-sensitive search.
+
+    Actions are executed on the exact element from browser_observe, with a
+    90-second expiry and current-page verification. No payment, account
+    change, arbitrary form submission or CAPTCHA automation.
+    """
+    if (not isinstance(snapshot_id, str) or not 8 <= len(snapshot_id) <= 128
+            or not isinstance(ref, str) or not 1 <= len(ref) <= 12):
+        raise ValueError("Use a snapshot_id and ref returned by browser_observe")
+    if action not in {"click", "fill", "search"}:
+        raise ValueError("action must be click, fill, or search")
+    if text is not None and (not isinstance(text, str) or len(text) > 160):
+        raise ValueError("Search text must contain at most 160 characters")
+    selected = _target(target_id)
+    current = browser_page_text(target_id=selected["id"], max_chars=500)
+    if current.get("access_status") in {"restricted", "verification_required"}:
+        return {"ok": False, "error": "Site access or manual verification is required",
+                "retry_safe": False}
+    host = urlsplit(selected.get("url", "")).hostname
+    if host:
+        if action in {"click", "search"}:
+            _pace_navigation(host.lower())
+        else:
+            _check_access_only(host.lower())
+    return _gui_action(selected, "act_ref", {
+        "snapshot_id": snapshot_id, "ref": ref,
+        "interaction": action, "text": text,
+    })
+
+
+@mcp.tool()
 def browser_click(selector: str, target_id: str | None = None) -> dict:
     """Click a CSS element with Playwright; report any new tab or navigation."""
     if not isinstance(selector, str) or not 1 <= len(selector) <= 512:
@@ -1016,4 +1065,10 @@ def browser_submit_verification(verification_id: str, answer: str,
 
 if __name__ == "__main__":
     # Bind localhost only. For remote access use SSH forwarding or an authenticated HTTPS reverse proxy.
-    mcp.run(transport="streamable-http", host="127.0.0.1", port=MCP_PORT, json_response=True)
+    # Only the explicit localhost-only standalone Docker profile may opt in
+    # to listening on the container interface for 127.0.0.1 host port mapping.
+    bind_host = os.environ.get("HACKBROWSER_MCP_HOST", "127.0.0.1")
+    if bind_host not in {"127.0.0.1", "0.0.0.0"}:
+        raise ValueError("HACKBROWSER_MCP_HOST must be 127.0.0.1 or 0.0.0.0")
+    mcp.run(transport="streamable-http", host=bind_host,
+            port=MCP_PORT, json_response=True)
