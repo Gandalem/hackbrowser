@@ -1,4 +1,4 @@
-# MCP 도구 레퍼런스 (PocMap 22 · HackBrowser 20 · ZAP 17)
+# MCP 도구 레퍼런스 (PocMap 22 · HackBrowser 22 · ZAP 17)
 
 [프로젝트 설치](../README.md) · [운영 및 계정 관리](../MCP-Deployment/README.md)
 
@@ -46,25 +46,36 @@
 </details>
 
 <details>
-<summary><b>HackBrowser MCP — Chromium 브라우저 제어 도구 20개</b></summary>
+<summary><b>HackBrowser MCP — AI GUI Chromium 도구 22개</b></summary>
 
-| 도구 | 기능 | 주요 입력·참고 |
+| 도구 | 기능 | 주요 입력값 |
 |---|---|---|
-| `browser_status` | 로컬 Chrome DevTools Protocol(CDP) 연결 및 탭 수 확인 | 입력 없이 호출 |
-| `browser_tabs` | 열린 탭·웹뷰의 제목, URL, `target_id` 목록 조회 | 입력 없이 호출 |
-| `browser_navigate` | 대상 탭을 지정한 HTTP(S) URL로 이동 | `url`, `target_id`(선택) |
-| `browser_page_text` | 열린 페이지의 제목·URL·표시 텍스트 추출 | `target_id`(선택), `max_chars`(최대 30,000) |
-| `browser_elements` | 페이지의 링크와 입력창·버튼 요소 정보를 수집 | `target_id`(선택), `max_items`(최대 100) |
-| `browser_click` | CSS 선택자로 찾은 페이지 요소를 클릭 | `selector`, `target_id`(선택) |
-| `browser_fill` | CSS 선택자로 입력창에 값을 지정하고 `input`/`change` 이벤트 발생 | `selector`, `value`, `target_id`(선택) |
-| `browser_keypress` | Enter·Tab·Esc·방향키 등 지정된 키를 활성 페이지에 전송 | `key`, `target_id`(선택) |
-| `browser_scroll` | 상하좌우 스크롤 후 반영된 좌표를 다시 측정하며 `moved`·`at_boundary` 상태 반환 | `direction`, `pixels`(1~1500), `selector`·`target_id`(선택) |
-| `browser_wait_for` | 로딩 완료·CSS 요소·텍스트 등장 대기(접근 제한 시 중지) | `selector` 또는 `text`(선택), `timeout_seconds`(1~20), `target_id`(선택) |
-| `browser_submit_verification` | 사용자가 채팅 카드에 직접 입력한 답을 선택한 화면 위치에 1회 제출 | `verification_id`, `answer`, `input_x`, `input_y`, `confirm_x`, `confirm_y` |
-| `browser_screenshot` | 브라우저 화면을 PNG로 캡처하고 MCP 클라이언트에 이미지(`image/png`)를 직접 반환하며, 서버에 파일 저장 없이 반환 | `target_id`(선택); 이미지 콘텐츠와 바이트 수 반환 |
+| `browser_status` | GUI Chromium CDP 연결 상태 | 없음 |
+| `browser_tabs` | 열린 탭 및 ID 조회 | 없음 |
+| `browser_close_tabs` | 지정한 탭 종료 (빈 탭 유지 가능) | `target_ids`, `keep_one_blank` |
+| `browser_navigate` | URL 이동 | `url`, `target_id` |
+| **`browser_observe`** | 현재 페이지의 제목·텍스트·짧은 요소 참조 반환 | `target_id`, `max_elements` |
+| **`browser_act`** | 최신 스냅샷에서 안전한 링크 클릭/검색 입력/GET 검색 제출 | `snapshot_id`, `ref`, `action`, `text`, `target_id` |
+| `browser_page_text` | 페이지 표시 텍스트 조회 | `target_id`, `max_chars` |
+| `browser_elements` | 기존 CSS 선택자 기반 링크·컨트롤 조회 | `target_id`, `max_items` |
+| `browser_click` | CSS로 요소 클릭 | `selector`, `target_id` |
+| `browser_click_text` | 역할과 표시 텍스트로 클릭 | `text`, `role`, `exact`, `container_selector`, `target_id` |
+| `browser_fill` | CSS로 입력창 수정 | `selector`, `value`, `target_id` |
+| `browser_fill_and_submit` | 입력 후 Enter | `selector`, `value`, `target_id` |
+| `browser_click_at` | GUI 화면 좌표 클릭 | `x`, `y`, `target_id` |
+| `browser_keypress` | 키 입력 | `key`, `target_id` |
+| `browser_scroll` | 스크롤 | `direction`, `pixels`, `target_id` |
+| `browser_wait_for` | 요소·텍스트·로딩 대기 | `selector`, `text`, `timeout_seconds`, `target_id` |
+| `browser_screenshot` | PNG 이미지와 수동 인증 UI | `target_id` |
+| `browser_verification_click` | 사용자가 고른 인증 위치 클릭 | `verification_id`, `x`, `y` |
+| `browser_submit_verification` | 사용자 직접 입력 CAPTCHA 전달 | `verification_id`, `answer` 및 좌표 |
+| `browser_workflow_start` | 안전한 탐색 작업 묶음 실행 | `steps`, `target_id` |
+| `browser_workflow_status` | 작업 상태·다음 단계 | `workflow_id` |
+| `browser_workflow_resume` | 사용자 인증 후 다음 단계에서 재개 | `workflow_id` |
 
-- **탭 지정:** 기본 탭 대신 특정 화면을 다루려면 `browser_tabs`로 `target_id`를 확인한 뒤 전달합니다.
-- **화면 캡처:** `browser_screenshot`은 MCP의 **텍스트 메타데이터 + `image/png` 이미지 콘텐츠**를 반환하고, 서버 파일 저장 없이 MCP Apps 이미지 뷰어로 전달합니다. 클라이언트가 이미지 콘텐츠 표시를 지원해야 실제 채팅에서 이미지가 보입니다. 8 MiB를 초과하거나 PNG가 아닌 응답은 거부합니다.
+**AI 사용 권장:** `browser_observe` → `browser_act` → `browser_observe` 또는 `browser_wait_for`로 실제 결과 검증. 최신 참조는 90초 후 만료되고 페이지가 바뀌면 무효화됩니다. 안전한 탐색 외 작업은 별도 명시적 사용자가 제어하는 도구에서만 진행해야 합니다. 민감한 작업을 임의로 우회하지 마세요.
+
+**보안 주의:** 스크린샷과 페이지 텍스트에는 개인 정보가 표시될 수 있습니다. 사용자별 Chromium 프로필은 아직 분리되어 있지 않습니다. 단독 Docker 경로는 OAuth 없이 로컬 접속만 허용합니다.
 
 </details>
 
