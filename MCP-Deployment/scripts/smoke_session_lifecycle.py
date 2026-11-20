@@ -92,12 +92,24 @@ def main():
                 print("[PASS] Idle browser + MCP bridge stopped; profile retained", flush=True)
 
                 next_url, next_key = manager.acquire(owner)
-                if next_key != key or next_url != url:
-                    raise AssertionError("Reconnected owner got a different profile mapping")
-                newer = manager.pool._sessions[key]
+                if next_key != key:
+                    raise AssertionError("Owner identity changed after reconnect")
+                newer = manager.pool._sessions[next_key]
                 if newer.profile_dir != first_profile:
                     raise AssertionError("User's persistent profile changed on reconnect")
-                if newer.process.pid == first_browser_pid or manager.bridges[key].pid == first_bridge_pid:
+                # CDP/MCP ports are dynamically selected after eviction. The
+                # previous listener may not have released its port yet, so
+                # only the stable owner key/profile must remain unchanged.
+                expected_url = f"http://127.0.0.1:{newer.port + 200}/mcp"
+                if next_url != expected_url:
+                    raise AssertionError("Reconnected MCP URL does not match its assigned CDP port")
+                _response, status = require_ok(next_url, "browser_status")
+                if (not status.get("connected")
+                        or status.get("cdp") != f"http://127.0.0.1:{newer.port}"):
+                    raise AssertionError("Reconnected MCP bridge targets the wrong Chromium")
+                if next_url != url:
+                    print("[INFO] Dedicated MCP port was reassigned after reconnect", flush=True)
+                if newer.process.pid == first_browser_pid or manager.bridges[next_key].pid == first_bridge_pid:
                     raise AssertionError("Browser or MCP bridge was not freshly started")
                 new_tab = ensure_tab(next_url, newer.port)
                 require_ok(next_url, "browser_navigate", {
