@@ -61,6 +61,13 @@ class SourceTests(unittest.TestCase):
             script.rindex('caddy caddy reload --config /etc/caddy/Caddyfile'),
         )
 
+    def test_deployment_preflights_mcp_apps_before_restarting(self):
+        deployer = (ROOT / "scripts/deploy_release.sh").read_text()
+        self.assertIn('from mcp.server.apps import Apps', deployer)
+        self.assertIn("runpy.run_path(", deployer)
+        self.assertLess(deployer.index("runpy.run_path("),
+                        deployer.index("systemctl restart mcpstack-chromium.service"))
+
     def test_hackbrowser_tools(self):
         tree = ast.parse((ROOT / "services/hackbrowser/server.py").read_text())
         exported = [
