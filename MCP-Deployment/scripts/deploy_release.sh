@@ -84,6 +84,9 @@ chmod 0755 "$ROOT/services/hackbrowser/start_chromium_headless.sh"
 # Install/check Hangul fonts before restarting the renderer so Chrome sees them.
 bash "$ROOT/scripts/ensure_korean_fonts.sh"
 "$ROOT/runtime/venv-hackbrowser/bin/python" -m py_compile "$ROOT/services/hackbrowser/server.py"
+# Exercise actual module initialization: Python compilation alone does not
+# validate extension registration or the ui:// resource on the target SDK.
+"$ROOT/runtime/venv-hackbrowser/bin/python" -c "import runpy; runpy.run_path('$ROOT/services/hackbrowser/server.py', run_name='screenshot_ui_preflight')"
 systemctl restart mcpstack-chromium.service mcpstack-hackbrowser.service mcpstack-share.service
 docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" up -d zap caddy
 # "up -d" alone does not reload a modified bind-mounted Caddyfile.
