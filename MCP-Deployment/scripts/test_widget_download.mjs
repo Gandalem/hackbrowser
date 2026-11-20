@@ -12,11 +12,17 @@ assert.ok(!html.includes("/captures/"), "obsolete public endpoint remains");
 
 const listeners = new Map();
 const elements = new Map();
-for (const name of ["preview", "status", "download", "details"]) {
+for (const name of ["preview", "status", "download", "details",
+                   "verification-card", "verification-answer",
+                   "verification-positions", "verification-status",
+                   "verification-submit", "pick-input", "pick-confirm"]) {
   elements.set(name, {
-    textContent: "",
-    disabled: name === "download",
+    textContent: "", value: "",
+    hidden: name === "verification-card",
+    disabled: ["download", "verification-submit"].includes(name),
     style: { display: "none" },
+    classList: { add() {}, remove() {} },
+    getBoundingClientRect() { return { left: 0, top: 0, width: 600, height: 400 }; },
     addEventListener(event, handler) { this[event] = handler; },
   });
 }
@@ -25,6 +31,12 @@ let context;
 const parent = {
   postMessage(message) {
     sent.push(message);
+    if (message.method === "tools/call") {
+      context.window.onMessage({
+        source: parent, data: { jsonrpc: "2.0", id: message.id,
+          result: { content: [{ type: "text", text: '{"ok":true}' }] } },
+      });
+    }
     if (message.method === "ui/download-file") {
       context.window.onMessage({
         source: parent, data: { jsonrpc: "2.0", id: message.id, result: {} },
@@ -86,4 +98,41 @@ assert.equal(request.params.contents[0].resource.mimeType, "image/png");
 assert.equal(request.params.contents[0].resource.blob, png.toString("base64"));
 assert.equal(elements.get("download").disabled, false);
 assert.match(elements.get("status").textContent, /요청을 전달했습니다/);
+
+// A human reads the picture, chooses two positions, and explicitly submits.
+window.onMessage({
+  source: parent,
+  data: {
+    jsonrpc: "2.0", method: "ui/notifications/tool-result",
+    params: { content: [
+      { type: "text", text: JSON.stringify({
+        bytes: png.length, mime_type: "image/png",
+        verification: {
+          required: true, id: "session-one-time", viewport: { width: 1200, height: 800 },
+        },
+      }) },
+      { type: "image", mimeType: "image/png", data: png.toString("base64") },
+    ] },
+  },
+});
+assert.equal(elements.get("verification-card").hidden, false);
+elements.get("verification-answer").value = "1234";
+elements.get("verification-answer").input();
+elements.get("pick-input").click();
+elements.get("preview").click({ clientX: 100, clientY: 100 });
+elements.get("pick-confirm").click();
+elements.get("preview").click({ clientX: 300, clientY: 200 });
+assert.equal(elements.get("verification-submit").disabled, false);
+await elements.get("verification-submit").click();
+const request2 = sent.find(message => message.method === "tools/call");
+assert.equal(request2.params.name, "browser_submit_verification");
+assert.equal(request2.params.arguments.verification_id, "session-one-time");
+assert.equal(request2.params.arguments.answer, "1234");
+assert.equal(request2.params.arguments.input_x, 200);
+assert.equal(request2.params.arguments.input_y, 200);
+assert.equal(request2.params.arguments.confirm_x, 600);
+assert.equal(request2.params.arguments.confirm_y, 400);
+assert.equal(elements.get("verification-answer").value, "");
+assert.equal(elements.get("verification-submit").disabled, true);
+console.log("MCP Apps manual CAPTCHA card tool submission: PASS");
 console.log("MCP Apps host-mediated PNG download: PASS");
