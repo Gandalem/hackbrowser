@@ -194,8 +194,9 @@ if ! docker compose version >/dev/null 2>&1; then
   echo 'Docker Compose v2 unavailable' >&2; exit 1
 fi
 
-# Use the ARM64 Chrome for Testing build proven to work with the local CDP bridge.
-# Ubuntu 22.04 chromium is Snap-based and fails in this non-login systemd service.
+# The GUI launcher also requires a private X virtual display, even on servers.
+# Keep platform-specific Chromium selection for OCI ARM64 and other Linux hosts.
+apt-get install -y --no-install-recommends xvfb xauth
 ARCH="$(dpkg --print-architecture)"
 CHROME_BINARY=''
 if [[ "$ARCH" == 'arm64' ]]; then
@@ -216,11 +217,7 @@ if [[ "$ARCH" == 'arm64' ]]; then
     rm -f "$chrome_zip"
     chmod -R a+rX /opt/mcp-chrome
   fi
-  if [[ ! -x "$CHROME_BINARY" ]]; then
-    echo "ARM64 Chrome executable missing: $CHROME_BINARY" >&2; exit 1
-  fi
 else
-  # Retain the distro/Google Chrome installation path on other architectures.
   for binary in google-chrome-stable google-chrome chromium chromium-browser; do
     if command -v "$binary" >/dev/null 2>&1; then
       CHROME_BINARY="$(command -v "$binary")"; break
@@ -234,13 +231,11 @@ else
     rm -f "$chrome_deb"
     CHROME_BINARY="$(command -v google-chrome-stable)"
   fi
-  if [[ -z "$CHROME_BINARY" ]]; then
-    echo "No supported Chrome/Chromium browser found for architecture $ARCH" >&2; exit 1
-  fi
 fi
-
-# Install system fonts before the headless browser is started. This also
-# verifies that the unprivileged mcpstack account can resolve Hangul glyphs.
+[[ -n "$CHROME_BINARY" && -x "$CHROME_BINARY" ]] || {
+  echo "No supported GUI Chrome/Chromium browser found for $ARCH" >&2
+  exit 1
+}
 bash "$ROOT/scripts/ensure_korean_fonts.sh"
 
 # Three separate venvs minimize dependency conflicts.
@@ -258,7 +253,7 @@ chmod -R a+rX "$ROOT/runtime/venv-pocmap" "$ROOT/runtime/venv-hackbrowser" "$ROO
 python3 "$ROOT/scripts/render_config.py"
 
 # Ensure script path and login home are accessible by mcpstack, not writable by it.
-chmod 0755 "$ROOT/services/hackbrowser/start_chromium_headless.sh"
+chmod 0755 "$ROOT/services/hackbrowser/start_chromium_gui.sh"
 chmod 0755 "$ROOT" "$ROOT/runtime" "$ROOT/services" "$ROOT/scripts"
 
 make_unit() {
@@ -270,24 +265,14 @@ make_unit() {
     "$ROOT/templates/mcpstack.service.in" > "/etc/systemd/system/mcpstack-$service.service"
 }
 make_unit pocmap 'PocMap MCP' "$ROOT/runtime/venv-pocmap/bin/pocmap-mcp --transport http --host 127.0.0.1 --port 9000" ''
-make_unit chromium 'Headless Chromium CDP for MCP' "/bin/bash $ROOT/services/hackbrowser/start_chromium_headless.sh" ''
-if [[ "$ARCH" == 'arm64' ]]; then
-  # The browser runs as the existing unprivileged mcpstack account, without Snap.
-  install -d -m 0700 -o mcpstack -g "$MCP_GROUP" /var/lib/mcpstack/.runtime
-  mkdir -p /etc/systemd/system/mcpstack-chromium.service.d
-  cat > /etc/systemd/system/mcpstack-chromium.service.d/10-arm64-chrome.conf <<EOF
-[Service]
-Environment=XDG_RUNTIME_DIR=/var/lib/mcpstack/.runtime
-Environment=CHROMIUM_BIN=$CHROME_BINARY
-EOF
-fi
-make_unit hackbrowser 'HackBrowser CDP MCP bridge' "$ROOT/runtime/venv-hackbrowser/bin/python $ROOT/services/hackbrowser/server.py" 'After=mcpstack-chromium.service'
+make_unit hackbrowser 'HackBrowser GUI CDP MCP bridge' "$ROOT/runtime/venv-hackbrowser/bin/python $ROOT/services/hackbrowser/server.py" 'After=mcpstack-gui-chromium.service'
 make_unit share 'Time-limited generic MCP gateway' "$ROOT/runtime/venv-gateway/bin/python $ROOT/services/gateway/shared_gateway.py" ''
 make_unit oauth 'Keycloak OAuth JWT MCP gateway' "$ROOT/runtime/venv-gateway/bin/python $ROOT/services/gateway/oauth_gateway.py" ''
 
 systemctl daemon-reload
-systemctl enable --now mcpstack-pocmap.service mcpstack-chromium.service
-systemctl enable --now mcpstack-hackbrowser.service mcpstack-share.service
+systemctl enable --now mcpstack-pocmap.service
+CHROMIUM_BIN="$CHROME_BINARY" bash "$ROOT/scripts/configure_gui_chromium.sh"
+systemctl enable --now mcpstack-share.service
 
 cd "$ROOT"
 # Pull/run key services; bridge and gateways bind 127.0.0.1 only.
