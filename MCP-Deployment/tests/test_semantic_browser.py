@@ -159,6 +159,78 @@ class SemanticTests(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(self.link.clicks, 0)
 
+    def test_observe_multiple_frames_and_click_child_element(self):
+        child_link = Handle(element(
+            label="Frame article", href="https://example.org/frame-article",
+        ))
+        child_frame = Page([child_link])
+        child_frame.url = "https://example.org/embedded"
+        self.page.frames = [self.page, child_frame]
+        self.page.main_frame = self.page
+        observed = self.engine.observe(self.page, "tab1")
+        self.assertEqual(observed["frames_scanned"], 2)
+        self.assertEqual([e["frame"] for e in observed["elements"]], [0, 1])
+        self.assertEqual(observed["elements"][1]["name"], "Frame article")
+        self.assertIn("click", observed["elements"][1]["allowed_actions"])
+        result = self.engine.act(
+            self.page, "tab1", observed["snapshot_id"], "e2", "click",
+        )
+        self.assertTrue(result["ok"])
+        self.assertEqual(child_link.clicks, 1)
+        self.assertEqual(self.link.clicks, 0)
+
+    def test_nested_frame_navigation_invalidates_ref(self):
+        child_link = Handle(element(
+            label="Embedded", href="https://example.org/embedded-article",
+        ))
+        child_frame = Page([child_link])
+        child_frame.url = "https://example.org/iframe"
+        self.page.frames = [self.page, child_frame]
+        observed = self.engine.observe(self.page, "tab1")
+        child_frame.url = "https://example.org/iframe-next"
+        result = self.engine.act(
+            self.page, "tab1", observed["snapshot_id"], "e2", "click",
+        )
+        self.assertFalse(result["ok"])
+        self.assertIn("frame", result["error"])
+        self.assertEqual(child_link.clicks, 0)
+
+    def test_detached_frame_invalidates_ref(self):
+        child = Page([Handle(element(label="In iframe"))])
+        child.is_detached = lambda: True
+        self.page.frames = [self.page, child]
+        observed = self.engine.observe(self.page, "tab1")
+        result = self.engine.act(
+            self.page, "tab1", observed["snapshot_id"], "e2", "click",
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(child.handles[0].clicks, 0)
+
+    def test_disabling_control_after_observation_rejects_click(self):
+        observed = self.engine.observe(self.page, "tab1")
+        self.link.details["disabled"] = True
+        result = self.engine.act(
+            self.page, "tab1", observed["snapshot_id"], "e1", "click",
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(self.link.clicks, 0)
+
+    def test_hidden_frame_failure_does_not_discard_main_elements(self):
+        class BrokenFrame:
+            url = "https://example.org/unavailable"
+            def query_selector_all(self, selector):
+                raise RuntimeError("Frame unavailable")
+        self.page.frames = [self.page, BrokenFrame()]
+        observed = self.engine.observe(self.page, "tab1")
+        self.assertEqual(len(observed["elements"]), 1)
+        self.assertEqual(observed["elements"][0]["name"], "Read article")
+
+    def test_visible_controls_include_action_hints(self):
+        observed = self.engine.observe(self.page, "tab1")
+        first = observed["elements"][0]
+        self.assertTrue(first["in_viewport"] is False)
+        self.assertEqual(first["allowed_actions"], ["click"])
+
     def test_sensitive_button_and_field_refused(self):
         self.assertFalse(allow_action("click", element(
             tag="button", role="button", label="Buy now", href=""

@@ -99,6 +99,11 @@ def clean_public_details(details: dict, ref: str) -> dict:
     }
     if details.get("type"):
         result["type"] = str(details["type"])[:32]
+    result["in_viewport"] = bool(details.get("in_viewport", False))
+    result["allowed_actions"] = [
+        action for action in ("click", "fill", "search")
+        if allow_action(action, details)[0]
+    ]
     href = details.get("href")
     if isinstance(href, str) and href:
         try:
@@ -120,9 +125,13 @@ DESCRIBE_ELEMENT_JS = r"""(el) => {
     const tag = el.tagName.toLowerCase();
     const type = (el.getAttribute('type') || (tag === 'input' ? 'text' : '')).toLowerCase();
     if (['password', 'hidden', 'file', 'tel', 'email', 'number'].includes(type)) return null;
+    // aria-labelledby can refer to an element INSIDE an open shadow root.
     const named = el.getAttribute('aria-labelledby');
+    const root = el.getRootNode();
+    const labelRoot = root && typeof root.getElementById === 'function'
+      ? root : document;
     const fromLabel = named ? named.split(/\s+/).map(id =>
-      document.getElementById(id)?.textContent || '').join(' ') : '';
+      labelRoot.getElementById(id)?.textContent || '').join(' ') : '';
     const label = fromLabel ||
       el.getAttribute('aria-label') ||
       (el.labels?.length ? Array.from(el.labels).map(x => x.innerText).join(' ') : '') ||
@@ -144,5 +153,7 @@ DESCRIBE_ELEMENT_JS = r"""(el) => {
       form_method: form ? (form.getAttribute('method') || 'get').toLowerCase() : '',
       form_action: form ? form.action : '',
       form_has_password: !!(form && form.querySelector('input[type="password"]')),
+      in_viewport: rect.bottom > 0 && rect.right > 0 &&
+        rect.top < innerHeight && rect.left < innerWidth,
     };
 }"""
