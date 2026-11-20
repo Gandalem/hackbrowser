@@ -312,9 +312,22 @@ def _workflow_execute(target_id: str, step: dict) -> dict:
     """Dispatch only the explicitly whitelisted browsing operations."""
     op = step["op"]
     if op == "navigate":
+        original_url = _target(target_id).get("url", "")
         result = browser_navigate(url=step["url"], target_id=target_id)
-        return {"ok": bool(result.get("navigation_started")),
-                "next_target_id": result.get("target_id", target_id)}
+        if not result.get("navigation_started"):
+            return {"ok": False}
+        # Page.navigate only confirms a request was initiated. Wait until the
+        # actual tab URL changes, including redirects to a login challenge.
+        # Never start the next workflow operation on the previous document.
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            current = browser_page_text(target_id=target_id, max_chars=500)
+            final_url = current.get("url", "")
+            if final_url == step["url"] or final_url != original_url:
+                return {"ok": True, "next_target_id": target_id,
+                        "observed_url": final_url}
+            time.sleep(0.2)
+        return {"ok": False, "error": "Navigation did not leave the previous page"}
     if op == "wait":
         result = browser_wait_for(
             selector=step.get("selector"), text=step.get("text"),
