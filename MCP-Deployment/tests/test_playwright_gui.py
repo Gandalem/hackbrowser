@@ -59,7 +59,7 @@ class FakePage:
 
     def __init__(self):
         self.element = FakeLocator()
-        self.mouse = types.SimpleNamespace(click=lambda x, y, timeout: None)
+        self.mouse = types.SimpleNamespace(click=lambda x, y: None)
 
     def is_closed(self):
         return False
@@ -113,8 +113,8 @@ class GuiActionTests(unittest.TestCase):
         server._next_navigation_at.clear()
         server._restricted_until.clear()
 
-    def _run(self, action, args, tabs=None):
-        page = FakePage()
+    def _run(self, action, args, tabs=None, page=None):
+        page = page or FakePage()
         fake = FakePlaywright(FakeBrowser(page))
         pw_module = types.ModuleType("playwright.sync_api")
         pw_module.sync_playwright = lambda: fake
@@ -157,6 +157,26 @@ class GuiActionTests(unittest.TestCase):
         press, page, _ = self._run("press", {"selector": "#q", "key": "Enter"})
         self.assertTrue(press["ok"])
         self.assertEqual(page.element.presses, ["Enter"])
+
+    def test_gui_coordinate_click_uses_supported_mouse_api(self):
+        page = FakePage()
+        clicks = []
+        page.mouse = types.SimpleNamespace(click=lambda x, y: clicks.append((x, y)))
+        result, _, _ = self._run("click_at", {"x": 600, "y": 350}, page=page)
+        self.assertTrue(result["ok"])
+        self.assertEqual(clicks, [(600, 350)])
+
+    def test_semantic_click_reports_ambiguous_matches_without_mcp_exception(self):
+        page = FakePage()
+        duplicate = FakeLocator()
+        duplicate.count = lambda: 3
+        page.get_by_role = lambda role, name, exact: duplicate
+        result, _, _ = self._run("click_text", {
+            "text": "건프라", "role": "link", "exact": True,
+        }, page=page)
+        self.assertFalse(result["ok"])
+        self.assertIn("Multiple elements match (3)", result["error"])
+        self.assertEqual(duplicate.clicks, 0)
 
     def test_rejects_nonlocal_cdp_or_ambiguous_page(self):
         with self.assertRaisesRegex(RuntimeError, "local GUI"):
