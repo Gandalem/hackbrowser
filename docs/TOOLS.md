@@ -58,7 +58,7 @@
 | `browser_click` | CSS 선택자로 찾은 페이지 요소를 클릭 | `selector`, `target_id`(선택) |
 | `browser_fill` | CSS 선택자로 입력창에 값을 지정하고 `input`/`change` 이벤트 발생 | `selector`, `value`, `target_id`(선택) |
 | `browser_keypress` | Enter·Tab·Esc·방향키 등 지정된 키를 활성 페이지에 전송 | `key`, `target_id`(선택) |
-| `browser_scroll` | 현재 페이지나 선택한 스크롤 컨테이너를 상하좌우로 이동 | `direction`, `pixels`(1~1500), `selector`·`target_id`(선택) |
+| `browser_scroll` | 상하좌우 스크롤 후 반영된 좌표를 다시 측정하며 `moved`·`at_boundary` 상태 반환 | `direction`, `pixels`(1~1500), `selector`·`target_id`(선택) |
 | `browser_wait_for` | 로딩 완료·CSS 요소·텍스트 등장 대기(접근 제한 시 중지) | `selector` 또는 `text`(선택), `timeout_seconds`(1~20), `target_id`(선택) |
 | `browser_screenshot` | 브라우저 화면을 PNG로 캡처하고 MCP 클라이언트에 이미지(`image/png`)를 직접 반환하며, 서버에 파일 저장 없이 반환 | `target_id`(선택); 이미지 콘텐츠와 바이트 수 반환 |
 
