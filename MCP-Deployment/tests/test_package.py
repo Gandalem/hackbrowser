@@ -33,7 +33,7 @@ class SourceTests(unittest.TestCase):
         self.assertIn('bash "$ROOT/scripts/ensure_korean_fonts.sh"', deployer)
         self.assertLess(
             deployer.index('bash "$ROOT/scripts/ensure_korean_fonts.sh"'),
-            deployer.index('bash "$ROOT/scripts/configure_gui_chromium.sh"'),
+            deployer.rindex('bash "$ROOT/scripts/configure_gui_chromium.sh"'),
         )
         self.assertIn("fonts-noto-cjk", helper)
         self.assertIn("fonts-nanum", helper)
@@ -64,7 +64,7 @@ class SourceTests(unittest.TestCase):
         self.assertIn('from mcp.server.apps import Apps', deployer)
         self.assertIn("runpy.run_path(", deployer)
         self.assertLess(deployer.index("runpy.run_path("),
-                        deployer.index('bash "$ROOT/scripts/configure_gui_chromium.sh"'))
+                        deployer.rindex('bash "$ROOT/scripts/configure_gui_chromium.sh"'))
 
     def test_hackbrowser_tools(self):
         tree = ast.parse((ROOT / "services/hackbrowser/server.py").read_text())
