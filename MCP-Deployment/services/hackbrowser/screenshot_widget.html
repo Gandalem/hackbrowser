@@ -240,8 +240,8 @@
       if (/MCP Resource not found|Unknown tool|Tool not found|not registered/i.test(message)) {
         return new Error(
           "ChatGPT의 HackBrowser 도구 목록이 이전 버전입니다. " +
-          "설정 → 플러그인 → HackBrowser → 새로고침을 실행하고, " +
-          "새 채팅에서 HackBrowser를 다시 선택한 뒤 캡처하세요."
+          "ChatGPT 설정에서 HackBrowser 연결을 새로고침하거나 다시 연결하고, " +
+          "새 채팅에서 HackBrowser를 선택해 새 캡처를 실행하세요."
         );
       }
       return error instanceof Error ? error : new Error(message || "MCP 도구 호출 실패");
@@ -404,9 +404,14 @@
         autoResumeOnConfirmed = true;
         await refreshCapture();
       } catch (error) {
-        verificationAnswer.value = "";
+        // An error may have happened before routing or after a successful
+        // one-time delivery. Preserve the visible answer for reference but
+        // prevent accidental duplicate submission until a fresh capture.
         activeVerification = null;
-        verificationStatus.textContent = error?.message || "제출에 실패했습니다.";
+        verificationSubmit.disabled = true;
+        verificationStatus.textContent =
+          (error?.message || "제출에 실패했습니다.") +
+          " 중복 제출하지 말고 연결 상태를 확인한 뒤 새 캡처를 실행하세요.";
       } finally {
         verificationSubmitting = false;
         picking = null;
