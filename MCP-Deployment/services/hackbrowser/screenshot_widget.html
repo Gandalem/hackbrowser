@@ -208,6 +208,7 @@
           resumeAgent.hidden = false;
           verificationStatus.textContent = "인증 화면이 보이지 않습니다. 현재 페이지가 정상인지 확인한 뒤, 보류된 작업을 재개할 수 있습니다.";
         }
+        updateManualControls();
         return;
       }
       lastVerificationTarget = metadata.target_id || lastVerificationTarget;
@@ -221,6 +222,7 @@
       verificationStatus.textContent = "인증 답변은 직접 입력해야 하며, 자동으로 풀지 않습니다.";
       verificationCard.hidden = false;
       updateVerificationControls();
+      updateManualControls();
     }
 
     function toolObject(result) {
