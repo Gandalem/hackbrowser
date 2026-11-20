@@ -23,6 +23,9 @@ from mcp.server import MCPServer
 from mcp.server.apps import Apps
 from mcp.types import ImageContent, TextContent
 
+# Tests also load this module directly from a path rather than as a package.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 from handoff import manual_handoff as _manual_handoff
 
 _handoff_input_local = threading.local()
