@@ -67,7 +67,10 @@ class IsolatedRoutingTests(unittest.TestCase):
         item = {"target_id": "example-id", "url": "about:blank"}
         self.assertEqual(module.normalize_tabs([item]), [item])
         self.assertEqual(module.normalize_tabs({"result": [item]}), [item])
-        for invalid in ({}, {"result": []}, {"result": {}}, {"result": [{}]}):
+        self.assertEqual(module.normalize_tabs({"result": {"result": [item]}}), [item])
+        self.assertEqual(module.normalize_tabs({"result": []}), [])
+        self.assertEqual(module.normalize_tabs([]), [])
+        for invalid in ({}, {"result": {}}, {"result": [{}]}):
             with self.assertRaises(ValueError):
                 module.normalize_tabs(invalid)
 
