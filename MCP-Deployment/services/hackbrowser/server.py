@@ -9,6 +9,7 @@ import base64
 import binascii
 import json
 import os
+import secrets
 import threading
 import time
 from pathlib import Path
@@ -32,6 +33,10 @@ SCREENSHOT_UI_URI = "ui://hackbrowser/screenshot.html"
 MIN_NAVIGATION_INTERVAL_SECONDS = 4.0
 # If a site explicitly denies automated access, do not repeatedly hammer it.
 ACCESS_COOLDOWN_SECONDS = 30 * 60
+VERIFICATION_TTL_SECONDS = 5 * 60
+MAX_VERIFICATION_ANSWER_CHARS = 64
+_verification_lock = threading.Lock()
+_verification_sessions: dict[str, dict] = {}
 _access_lock = threading.Lock()
 _next_navigation_at: dict[str, float] = {}
 _restricted_until: dict[str, float] = {}
@@ -144,9 +149,8 @@ def _restriction_reason(url: str, text: str) -> str | None:
     if host.endswith(".naver.com") and (
         "쇼핑 서비스 접속이 일시적으로 제한되었습니다." in text
         or "검색 서비스 이용이 제한되었습니다." in text
-        or "Please complete the security verification." in text
     ):
-        return "네이버의 접속 제한 또는 사용자 확인 안내가 표시됨"
+        return "네이버의 접속 제한 안내가 표시됨"
     if (host == "google.com" or host.endswith(".google.com")) and (
         parsed.path.startswith("/sorry/")
         or "Our systems have detected unusual traffic from your computer network" in text
@@ -157,6 +161,30 @@ def _restriction_reason(url: str, text: str) -> str | None:
     ):
         return "G마켓에서 방문자 확인을 요구함"
     return None
+
+
+def _verification_reason(url: str, text: str) -> str | None:
+    """Separate a user-solvable challenge from an explicit access denial."""
+    host = (urlsplit(url).hostname or "").lower()
+    if (host == "naver.com" or host.endswith(".naver.com")) and (
+        "Please complete the security verification." in text
+    ):
+        return "네이버에서 사용자 확인을 요구함"
+    return None
+
+
+def _verification_state(target_id: str) -> dict:
+    """Inspect the current page without extracting a CAPTCHA answer."""
+    value = _evaluate("""(function(){return {
+      url:location.href,
+      text:(document.body?document.body.innerText:'').slice(0,4000),
+      viewport:{width:innerWidth,height:innerHeight}
+    };})()""", target_id)
+    if not isinstance(value, dict):
+        return {}
+    reason = _verification_reason(value.get("url", ""), value.get("text", ""))
+    return {"url": value.get("url", ""), "viewport": value.get("viewport", {}),
+            "verification_reason": reason}
 
 
 def _site_key(host: str) -> str:
@@ -258,13 +286,18 @@ def browser_page_text(target_id: str | None = None, max_chars: int = 12000) -> d
         return {"result": value}
     text = value.get("text", "")
     url = value.get("url", "")
-    reason = _restriction_reason(url, text) if isinstance(url, str) and isinstance(text, str) else None
     if isinstance(text, str):
         value["text"] = text[:max_chars]
+    verification = _verification_reason(url, text) if isinstance(url, str) and isinstance(text, str) else None
+    reason = _restriction_reason(url, text) if isinstance(url, str) and isinstance(text, str) else None
     if reason:
         value["access_status"] = "restricted"
         value["restriction_reason"] = reason
         value["retry_after_seconds"] = _record_restriction(url)
+    elif verification:
+        value["access_status"] = "verification_required"
+        value["verification_reason"] = verification
+        value["action"] = "browser_screenshot으로 채팅 내 수동 입력 화면을 열 수 있습니다."
     else:
         value["access_status"] = "ok"
     return value
@@ -494,6 +527,10 @@ def browser_wait_for(selector: str | None = None, text: str | None = None,
             return {"ok": False, "access_status": "restricted", "url": url,
                     "restriction_reason": reason,
                     "retry_after_seconds": _record_restriction(url)}
+        verification = _verification_reason(url, snippet)
+        if verification:
+            return {"ok": False, "access_status": "verification_required",
+                    "url": url, "verification_reason": verification}
         if result.get("matched"):
             return {"ok": True, "url": url, "title": result.get("title", ""),
                     "ready_state": result.get("ready_state", "")}
@@ -524,10 +561,98 @@ def browser_screenshot(target_id: str | None = None) -> list[TextContent | Image
         raise RuntimeError("Screenshot exceeds the 8 MiB limit")
 
     metadata = {"bytes": len(png), "mime_type": "image/png"}
+    # Only render the manual-entry UI when the actual open tab shows a
+    # recognized verification prompt. Never infer the answer or bypass it.
+    try:
+        selected = _target(target_id)
+        state = _verification_state(selected["id"])
+        if state.get("verification_reason"):
+            viewport = state.get("viewport") or {}
+            width, height = viewport.get("width"), viewport.get("height")
+            if (isinstance(width, int) and isinstance(height, int)
+                    and 0 < width <= 10000 and 0 < height <= 10000):
+                token = secrets.token_urlsafe(24)
+                now = time.monotonic()
+                with _verification_lock:
+                    for old_id, info in list(_verification_sessions.items()):
+                        if info["expires_at"] < now:
+                            _verification_sessions.pop(old_id, None)
+                    _verification_sessions[token] = {
+                        "target_id": selected["id"],
+                        "url": state["url"],
+                        "viewport": (width, height),
+                        "expires_at": now + VERIFICATION_TTL_SECONDS,
+                    }
+                metadata["verification"] = {
+                    "required": True,
+                    "id": token,
+                    "reason": state["verification_reason"],
+                    "viewport": {"width": width, "height": height},
+                    "expires_in_seconds": VERIFICATION_TTL_SECONDS,
+                }
+    except (RuntimeError, ValueError, TypeError):
+        # A screenshot must remain available if page inspection fails.
+        pass
     return [
         TextContent(type="text", text=json.dumps(metadata)),
         ImageContent(type="image", data=encoded, mime_type="image/png"),
     ]
+
+
+def _click_at(target_id: str, x: int, y: int) -> None:
+    """Use page coordinates so a human-selected input in an iframe can be focused."""
+    for event_type in ("mousePressed", "mouseReleased"):
+        _cdp("Input.dispatchMouseEvent", {
+            "type": event_type, "x": x, "y": y, "button": "left",
+            "clickCount": 1,
+        }, target_id)
+
+
+@mcp.tool()
+def browser_submit_verification(verification_id: str, answer: str,
+                                input_x: int, input_y: int,
+                                confirm_x: int, confirm_y: int) -> dict:
+    """Submit a user's manually read CAPTCHA answer, using user-chosen screen points.
+
+    Invoke only from an explicit user action in the screenshot MCP Apps form.
+    This tool does not recognize, solve, retry, or circumvent challenges.
+    """
+    if not isinstance(verification_id, str) or not verification_id:
+        raise ValueError("A verification ID from browser_screenshot is required")
+    if (not isinstance(answer, str) or not answer.strip()
+            or len(answer) > MAX_VERIFICATION_ANSWER_CHARS
+            or any(ord(c) < 32 or ord(c) == 127 for c in answer)):
+        raise ValueError("Enter a single-line verification answer (1-64 characters)")
+    coordinates = (input_x, input_y, confirm_x, confirm_y)
+    if any(not isinstance(n, int) or isinstance(n, bool) for n in coordinates):
+        raise ValueError("Input and confirm coordinates must be integer pixels")
+
+    with _verification_lock:
+        session = _verification_sessions.pop(verification_id, None)
+    if session is None or session["expires_at"] <= time.monotonic():
+        raise ValueError("Verification expired; capture a fresh screenshot")
+
+    width, height = session["viewport"]
+    if any(not 0 <= x < width for x in (input_x, confirm_x)) or any(
+            not 0 <= y < height for y in (input_y, confirm_y)):
+        raise ValueError("Selected points are outside the captured viewport")
+
+    selected = _target(session["target_id"])
+    state = _verification_state(selected["id"])
+    if (state.get("url") != session["url"]
+            or not state.get("verification_reason")
+            or state.get("viewport") != {"width": width, "height": height}):
+        raise RuntimeError("Verification page changed; capture a fresh screenshot")
+
+    host = urlsplit(state["url"]).hostname
+    if host:
+        _pace_navigation(host.lower())
+    _click_at(selected["id"], input_x, input_y)
+    _cdp("Input.insertText", {"text": answer}, selected["id"])
+    _click_at(selected["id"], confirm_x, confirm_y)
+    # Do not include or persist the answer in the tool result.
+    return {"ok": True, "submitted": True, "verification_status": "pending",
+            "message": "사용자 입력을 브라우저에 한 번 제출했습니다. 인증 결과를 확인하세요."}
 
 
 if __name__ == "__main__":
