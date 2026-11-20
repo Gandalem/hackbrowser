@@ -48,7 +48,7 @@ sudo python3 /opt/mcp-deployment/scripts/check_calls.py
 sudo cat /opt/mcp-deployment/runtime/deployed-version
 ```
 
-- `status.sh`: 서비스 포트, Keycloak/OAuth, MCP 50개 도구 검색 확인
+- `status.sh`: 서비스 포트, Keycloak/OAuth, MCP 51개 도구 검색 확인
 - `check_calls.py`: PocMap·HackBrowser·ZAP 실제 무해한 도구 호출 및 PNG 스크린샷 블록 확인
 - 워크플로 Artifacts: `tagged-ci-evidence`, `tagged-oci-deploy-evidence` 로그·이미지 증적
 

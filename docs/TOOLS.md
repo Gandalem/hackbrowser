@@ -1,4 +1,4 @@
-# MCP 도구 레퍼런스 (PocMap 22 · HackBrowser 11 · ZAP 17)
+# MCP 도구 레퍼런스 (PocMap 22 · HackBrowser 12 · ZAP 17)
 
 [프로젝트 설치](../README.md) · [운영 및 계정 관리](../MCP-Deployment/README.md)
 
@@ -9,7 +9,7 @@
 | MCP | 기능 | 도구 |
 |---|---|---:|
 | **PocMap** | CVE·PoC·취약점 정보 조회 | 22개 |
-| **HackBrowser MCP** | Chromium 브라우저 제어 | 11개 |
+| **HackBrowser MCP** | Chromium 브라우저 제어 | 12개 |
 | **OWASP ZAP MCP** | 웹 진단·스캔·HTTP 이력·보고서 | 17개 |
 
 <details>
@@ -46,7 +46,7 @@
 </details>
 
 <details>
-<summary><b>HackBrowser MCP — Chromium 브라우저 제어 도구 11개</b></summary>
+<summary><b>HackBrowser MCP — Chromium 브라우저 제어 도구 12개</b></summary>
 
 | 도구 | 기능 | 주요 입력·참고 |
 |---|---|---|
@@ -60,6 +60,7 @@
 | `browser_keypress` | Enter·Tab·Esc·방향키 등 지정된 키를 활성 페이지에 전송 | `key`, `target_id`(선택) |
 | `browser_scroll` | 상하좌우 스크롤 후 반영된 좌표를 다시 측정하며 `moved`·`at_boundary` 상태 반환 | `direction`, `pixels`(1~1500), `selector`·`target_id`(선택) |
 | `browser_wait_for` | 로딩 완료·CSS 요소·텍스트 등장 대기(접근 제한 시 중지) | `selector` 또는 `text`(선택), `timeout_seconds`(1~20), `target_id`(선택) |
+| `browser_submit_verification` | 사용자가 채팅 카드에 직접 입력한 답을 선택한 화면 위치에 1회 제출 | `verification_id`, `answer`, `input_x`, `input_y`, `confirm_x`, `confirm_y` |
 | `browser_screenshot` | 브라우저 화면을 PNG로 캡처하고 MCP 클라이언트에 이미지(`image/png`)를 직접 반환하며, 서버에 파일 저장 없이 반환 | `target_id`(선택); 이미지 콘텐츠와 바이트 수 반환 |
 
 - **탭 지정:** 기본 탭 대신 특정 화면을 다루려면 `browser_tabs`로 `target_id`를 확인한 뒤 전달합니다.
