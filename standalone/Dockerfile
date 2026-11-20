@@ -6,7 +6,9 @@ ENV DEBIAN_FRONTEND=noninteractive PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     chromium xvfb xauth curl ca-certificates fonts-noto-cjk fonts-nanum \
     && rm -rf /var/lib/apt/lists/*
-RUN groupadd -r mcp && useradd -r -g mcp -m -d /home/mcp mcp
+RUN groupadd -r mcp && useradd -r -g mcp -m -d /home/mcp mcp \
+    && mkdir -p /home/mcp/.local/share/hackbrowser-mcp \
+    && chown -R mcp:mcp /home/mcp
 
 WORKDIR /app
 COPY MCP-Deployment/services/hackbrowser/requirements.txt /app/requirements.txt
