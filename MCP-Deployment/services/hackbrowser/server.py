@@ -229,7 +229,7 @@ def browser_fill(selector: str, value: str, target_id: str | None = None) -> dic
     return result if isinstance(result, dict) else {"result": result}
 
 
-@apps.tool(resource_uri=SCREENSHOT_UI_URI, meta={"openai/outputTemplate": SCREENSHOT_UI_URI})
+@mcp.tool(meta={"ui": {"resourceUri": SCREENSHOT_UI_URI}, "openai/outputTemplate": SCREENSHOT_UI_URI})
 def browser_screenshot(target_id: str | None = None) -> list[TextContent | ImageContent]:
     """Capture a PNG, save a private local copy and return the image inline to the MCP client."""
     result = _cdp("Page.captureScreenshot", {"format": "png"}, target_id)
