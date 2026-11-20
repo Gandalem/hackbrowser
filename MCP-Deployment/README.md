@@ -1,6 +1,6 @@
 # MCP Deployment — 서버 운영 가이드
 
-[빠른 설치](../README.md) · [47개 도구](../docs/TOOLS.md) · [릴리스/OCI 배포](../docs/RELEASE.md) · [구성 출처](docs/PROVENANCE.md)
+[빠른 설치](../README.md) · [50개 도구](../docs/TOOLS.md) · [릴리스/OCI 배포](../docs/RELEASE.md) · [구성 출처](docs/PROVENANCE.md)
 
 Ubuntu/Debian **systemd 서버**용입니다. 클라우드 업체와 관계없이 설치할 수 있지만, 새 VM 전체 설치·네트워크 연동은 환경별 확인이 필요합니다. 관리자 권한, 인터넷, 권장 메모리 8GB·디스크 15GB 이상을 준비하세요.
 
@@ -123,7 +123,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
   http://127.0.0.1:8088/pocmap/mcp
 ```
 
-기대 결과: `/healthz`는 **200**, 인증 없는 `/pocmap/mcp`는 **401**, MCP 도구 검색은 PocMap 22 / HackBrowser 8 / ZAP 17개입니다. `check_calls.py`는 세 백엔드의 실제 호출과 HackBrowser PNG 이미지 블록을 확인합니다.
+기대 결과: `/healthz`는 **200**, 인증 없는 `/pocmap/mcp`는 **401**, MCP 도구 검색은 PocMap 22 / HackBrowser 11 / ZAP 17개입니다. `check_calls.py`는 세 백엔드의 실제 호출과 HackBrowser PNG 이미지 블록을 확인합니다.
 
 ## HackBrowser 스크린샷 미리보기 및 PNG 다운로드
 

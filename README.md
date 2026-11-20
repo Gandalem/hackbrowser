@@ -9,10 +9,10 @@ Ubuntu/Debian 서버에 **PocMap · HackBrowser · OWASP ZAP** MCP를 설치하�
 | MCP | 주요 기능 | 도구 수 |
 |---|---|---:|
 | **PocMap** | CVE·PoC·취약점 정보 조회 | 22 |
-| **HackBrowser** | Chromium 브라우저 제어·화면 캡처 | 8 |
+| **HackBrowser** | Chromium 브라우저 AI 제어·화면 캡처 | 11 |
 | **OWASP ZAP** | 웹 보안 점검·HTTP 기록·보고서 | 17 |
 
-[47개 도구 전체 보기](docs/TOOLS.md)
+[50개 도구 전체 보기](docs/TOOLS.md)
 
 ## 빠른 설치
 
@@ -70,7 +70,7 @@ OAuth 공개 클라이언트로 **Client Secret 없이 PKCE S256**을 사용합�
 ## 사용·운영 문서
 
 - **[서버 운영 가이드](MCP-Deployment/README.md)** — 로그인 ID/초기 비밀번호 조회, 추가 사용자 생성, 외부 도메인 서버 설정, 상태 확인, 문제 해결
-- **[MCP 도구 목록](docs/TOOLS.md)** — 47개 도구별 기능·입력값
+- **[MCP 도구 목록](docs/TOOLS.md)** — 50개 도구별 기능·입력값
 - **[릴리스 및 OCI 자동 배포](docs/RELEASE.md)** — Git 태그, CI/CD, 배포 설정·검증
 - **[소스 출처·제약](MCP-Deployment/docs/PROVENANCE.md)** — 원본/재구성 범위 및 제한 사항
 

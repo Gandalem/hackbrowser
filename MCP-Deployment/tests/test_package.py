@@ -86,8 +86,9 @@ class SourceTests(unittest.TestCase):
                     and d.func.value.id == "apps" and d.func.attr == "tool"
                     for d in node.decorator_list)
         ]
-        self.assertEqual(len(exported), 8)
-        self.assertIn("browser_screenshot", exported)
+        self.assertEqual(len(exported), 11)
+        for name in ("browser_screenshot", "browser_keypress", "browser_scroll", "browser_wait_for"):
+            self.assertIn(name, exported)
         self.assertEqual(app_exported, [])
 
     def test_caddy_modes(self):

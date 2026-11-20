@@ -144,8 +144,9 @@ def _restriction_reason(url: str, text: str) -> str | None:
     if host.endswith(".naver.com") and (
         "쇼핑 서비스 접속이 일시적으로 제한되었습니다." in text
         or "검색 서비스 이용이 제한되었습니다." in text
+        or "Please complete the security verification." in text
     ):
-        return "네이버의 접속 제한 안내가 표시됨"
+        return "네이버의 접속 제한 또는 사용자 확인 안내가 표시됨"
     if (host == "google.com" or host.endswith(".google.com")) and (
         parsed.path.startswith("/sorry/")
         or "Our systems have detected unusual traffic from your computer network" in text
@@ -274,10 +275,47 @@ def browser_elements(target_id: str | None = None, max_items: int = 30) -> dict:
     """List links and input selectors for the currently open page."""
     max_items = max(1, min(max_items, 100))
     expression = """(function(){
-      var links = Array.prototype.slice.call(document.querySelectorAll('a[href]'),0,%d)
-        .map(function(el){return {text:(el.innerText||'').slice(0,90),href:el.href};});
-      var inputs = Array.prototype.slice.call(document.querySelectorAll('input,textarea,button'),0,%d)
-        .map(function(el){return {tag:el.tagName.toLowerCase(),id:el.id||'',name:el.name||'',type:el.type||'',placeholder:el.placeholder||''};});
+      function visible(el){
+        var style=getComputedStyle(el), rect=el.getBoundingClientRect();
+        return style.display!=='none' && style.visibility!=='hidden' &&
+          rect.width>0 && rect.height>0;
+      }
+      function selectorFor(el){
+        if(el.id){
+          var idSelector='#'+CSS.escape(el.id);
+          if(document.querySelectorAll(idSelector).length===1)return idSelector;
+        }
+        var parts=[], node=el;
+        while(node && node.nodeType===1 && parts.length<8){
+          var tag=node.tagName.toLowerCase();
+          if(node.id){
+            parts.unshift('#'+CSS.escape(node.id));break;
+          }
+          var parent=node.parentElement;
+          if(parent){
+            var siblings=Array.prototype.filter.call(parent.children,function(n){
+              return n.tagName===node.tagName;
+            });
+            if(siblings.length>1)tag+=':nth-of-type('+(siblings.indexOf(node)+1)+')';
+          }
+          parts.unshift(tag);
+          node=parent;
+        }
+        return parts.join(' > ');
+      }
+      var links=Array.prototype.filter.call(document.querySelectorAll('a[href]'),visible)
+        .slice(0,%d).map(function(el){
+          return {text:(el.innerText||el.getAttribute('aria-label')||'').trim().slice(0,90),
+            href:el.href,selector:selectorFor(el),role:el.getAttribute('role')||''};
+        });
+      var inputs=Array.prototype.filter.call(
+        document.querySelectorAll('input,textarea,button,select,[role="button"]'),visible)
+        .slice(0,%d).map(function(el){
+          return {tag:el.tagName.toLowerCase(),id:el.id||'',name:el.name||'',
+            type:el.type||'',placeholder:el.placeholder||'',
+            label:(el.getAttribute('aria-label')||el.innerText||'').trim().slice(0,90),
+            selector:selectorFor(el),disabled:!!el.disabled};
+        });
       return {links:links,inputs:inputs};
     })()""" % (max_items, max_items)
     value = _evaluate(expression, target_id)
@@ -296,6 +334,11 @@ def browser_click(selector: str, target_id: str | None = None) -> dict:
     expression = """(function(){
       var el=document.querySelector(%s);
       if(!el)return {ok:false,error:'No element matches selector'};
+      if(el.disabled)return {ok:false,error:'Element is disabled'};
+      var style=getComputedStyle(el),rect=el.getBoundingClientRect();
+      if(style.display==='none'||style.visibility==='hidden'||rect.width===0||rect.height===0)
+        return {ok:false,error:'Element is not visible'};
+      el.scrollIntoView({block:'center',inline:'nearest'});
       el.click(); return {ok:true};
     })()""" % json.dumps(selector)
     value = _evaluate(expression, selected["id"])
@@ -322,6 +365,133 @@ def browser_fill(selector: str, value: str, target_id: str | None = None) -> dic
     })()""" % (json.dumps(selector), json.dumps(value), json.dumps(value))
     result = _evaluate(expression, target_id)
     return result if isinstance(result, dict) else {"result": result}
+
+
+# Named keys only: this MCP tool never accepts raw CDP commands or scripts.
+_KEY_EVENTS = {
+    "Enter": ("Enter", 13, "\r"),
+    "Tab": ("Tab", 9, None),
+    "Escape": ("Escape", 27, None),
+    "Backspace": ("Backspace", 8, None),
+    "Delete": ("Delete", 46, None),
+    "ArrowUp": ("ArrowUp", 38, None),
+    "ArrowDown": ("ArrowDown", 40, None),
+    "ArrowLeft": ("ArrowLeft", 37, None),
+    "ArrowRight": ("ArrowRight", 39, None),
+    "Home": ("Home", 36, None),
+    "End": ("End", 35, None),
+    "PageUp": ("PageUp", 33, None),
+    "PageDown": ("PageDown", 34, None),
+    "Space": ("Space", 32, " "),
+}
+
+
+@mcp.tool()
+def browser_keypress(key: str, target_id: str | None = None) -> dict:
+    """Press one named key (Enter, Tab, Escape, arrows, PageUp/Down, etc.) in the active page."""
+    if key not in _KEY_EVENTS:
+        raise ValueError("Unsupported key. Choose one of: " + ", ".join(_KEY_EVENTS))
+    target = _target(target_id)
+    host = urlsplit(target.get("url", "")).hostname
+    if host:
+        _pace_navigation(host.lower())
+    code, virtual_key, text = _KEY_EVENTS[key]
+    down = {"type": "keyDown", "key": key if key != "Space" else " ",
+            "code": code, "windowsVirtualKeyCode": virtual_key}
+    if text is not None:
+        down["text"] = text
+    _cdp("Input.dispatchKeyEvent", down, target["id"])
+    up = {"type": "keyUp", "key": down["key"], "code": code,
+          "windowsVirtualKeyCode": virtual_key}
+    _cdp("Input.dispatchKeyEvent", up, target["id"])
+    return {"ok": True, "key": key, "target_id": target["id"]}
+
+
+@mcp.tool()
+def browser_scroll(direction: str = "down", pixels: int = 600,
+                   selector: str | None = None, target_id: str | None = None) -> dict:
+    """Scroll a page or selected scrollable container in a bounded direction."""
+    if direction not in {"up", "down", "left", "right"}:
+        raise ValueError("direction must be up, down, left or right")
+    if not isinstance(pixels, int) or not 1 <= pixels <= 1500:
+        raise ValueError("pixels must be an integer between 1 and 1500")
+    if selector is not None and (not selector or len(selector) > 512):
+        raise ValueError("selector must contain 1-512 characters")
+    target = _target(target_id)
+    host = urlsplit(target.get("url", "")).hostname
+    if host:
+        _pace_navigation(host.lower())
+    axis = "top" if direction in {"up", "down"} else "left"
+    amount = pixels if direction in {"down", "right"} else -pixels
+    expression = """(function(){
+      var el=%s ? document.querySelector(%s) : document.scrollingElement;
+      if(!el)return {ok:false,error:'Scrollable element not found'};
+      var before={top:el.scrollTop,left:el.scrollLeft};
+      el.scrollBy({%s:%d,behavior:'auto'});
+      return {ok:true,before:before,after:{top:el.scrollTop,left:el.scrollLeft}};
+    })()""" % (json.dumps(selector is not None), json.dumps(selector), axis, amount)
+    result = _evaluate(expression, target["id"])
+    return result if isinstance(result, dict) else {"result": result}
+
+
+@mcp.tool()
+def browser_wait_for(selector: str | None = None, text: str | None = None,
+                     timeout_seconds: int = 10,
+                     target_id: str | None = None) -> dict:
+    """Wait for page load or a CSS selector/visible text; stop on access restrictions."""
+    if selector is not None and (not selector or len(selector) > 512):
+        raise ValueError("selector must contain 1-512 characters")
+    if text is not None and (not text or len(text) > 150):
+        raise ValueError("text must contain 1-150 characters")
+    if selector is not None and text is not None:
+        raise ValueError("Choose selector or text, not both")
+    if not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 20:
+        raise ValueError("timeout_seconds must be an integer between 1 and 20")
+    target = _target(target_id)
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        expression = """(function(){
+          var body=(document.body ? document.body.innerText : '');
+          var visibleText=body.slice(0,30000);
+          var matched=false;
+          try{
+            matched=%s;
+          }catch(e){
+            return {error:'Invalid CSS selector'};
+          }
+          return {url:location.href,title:document.title,
+                  ready_state:document.readyState,matched:matched,
+                  access_text:visibleText.slice(0,2000)};
+        })()""" % (
+            "(function(){var el=document.querySelector(" + json.dumps(selector)
+            + ");if(!el)return false;var rect=el.getBoundingClientRect();"
+            + "var style=getComputedStyle(el);return rect.width>0&&rect.height>0"
+            + "&&style.display!=='none'&&style.visibility!=='hidden';})()"
+            if selector is not None else
+            "visibleText.includes(" + json.dumps(text) + ")"
+            if text is not None else
+            "document.readyState==='complete'"
+        )
+        result = _evaluate(expression, target["id"])
+        if not isinstance(result, dict):
+            raise RuntimeError("Unexpected browser page state")
+        if "error" in result:
+            raise ValueError(result["error"])
+        url = result.get("url", "")
+        snippet = result.get("access_text", "")
+        reason = _restriction_reason(url, snippet)
+        if reason:
+            return {"ok": False, "access_status": "restricted", "url": url,
+                    "restriction_reason": reason,
+                    "retry_after_seconds": _record_restriction(url)}
+        if result.get("matched"):
+            return {"ok": True, "url": url, "title": result.get("title", ""),
+                    "ready_state": result.get("ready_state", "")}
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {"ok": False, "timeout": True, "url": url,
+                    "ready_state": result.get("ready_state", "")}
+        time.sleep(min(0.5, remaining))
 
 
 @mcp.tool(meta={"ui": {"resourceUri": SCREENSHOT_UI_URI}, "openai/outputTemplate": SCREENSHOT_UI_URI})
