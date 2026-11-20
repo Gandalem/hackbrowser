@@ -29,6 +29,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import ProxyHandler, Request, build_opener
 
+from keycloak_pkce import authorization_code
+
 SOURCE = Path(__file__).resolve().parents[1]
 LIVE = Path("/opt/mcp-deployment")
 OPEN = build_opener(ProxyHandler({}))
@@ -241,6 +243,9 @@ def main():
     if not chrome:
         raise RuntimeError("Chromium executable not found")
     gateway_port = unused_local_port()
+    pkce_mode = sys.argv[1:] == ["--pkce"]
+    callback_port = unused_local_port() if pkce_mode else None
+    callback_uri = f"http://127.0.0.1:{callback_port}/callback" if pkce_mode else None
     print("[INFO] Staging on loopback only; production ports remain untouched", flush=True)
 
     status, token_response = request(
@@ -286,8 +291,8 @@ def main():
             raise SystemExit("[WARN] Temporary Keycloak identities remain; review before merging")
         print("[PASS] No hb-smoke Keycloak users or clients remain")
         return
-    if len(sys.argv) != 1:
-        raise SystemExit("Usage: smoke_oauth_isolation.py [--verify-cleanup]")
+    if len(sys.argv) != 1 and not pkce_mode:
+        raise SystemExit("Usage: smoke_oauth_isolation.py [--pkce|--verify-cleanup]")
 
     try:
         status, scopes = admin("/client-scopes")
@@ -300,8 +305,10 @@ def main():
         status, _ = admin("/clients", "POST", {
             "clientId": client_id, "secret": client_secret, "enabled": True,
             "protocol": "openid-connect", "publicClient": False,
-            "standardFlowEnabled": False, "implicitFlowEnabled": False,
-            "directAccessGrantsEnabled": True, "serviceAccountsEnabled": False,
+            "standardFlowEnabled": pkce_mode, "implicitFlowEnabled": False,
+            "directAccessGrantsEnabled": not pkce_mode, "serviceAccountsEnabled": False,
+            "redirectUris": [callback_uri] if pkce_mode else [],
+            "attributes": {"pkce.code.challenge.method": "S256"} if pkce_mode else {},
         })
         expect(status, 201, "Create temporary OAuth test client")
         status, found = admin("/clients?clientId=" + quote(client_id))
@@ -360,15 +367,59 @@ def main():
                     + "cannot proceed under this realm policy: "
                     + ",".join(sorted(str(a)[:40] for a in actions))
                 )
+            if pkce_mode:
+                code, verifier = authorization_code(
+                    base_url=keycloak, public_base=public, realm=REALM,
+                    client_id=client_id, redirect_uri=callback_uri,
+                    username=user, password=password,
+                )
+                status, value = request(
+                    keycloak + f"/realms/{REALM}/protocol/openid-connect/token",
+                    "POST", {"client_id": client_id, "client_secret": client_secret,
+                             "grant_type": "authorization_code", "code": code,
+                             "redirect_uri": callback_uri, "code_verifier": verifier},
+                    form=True,
+                )
+                expect(status, 200, "Exchange real Keycloak PKCE code", value)
+            else:
+                status, value = request(
+                    keycloak + f"/realms/{REALM}/protocol/openid-connect/token",
+                    "POST", {"client_id": client_id, "client_secret": client_secret,
+                             "grant_type": "password", "username": user,
+                             "password": password}, form=True)
+                expect(status, 200, "Issue real user JWT", value)
+            tokens.append(value["access_token"])
+        print(
+            "[PASS] Three real Keycloak "
+            + ("authorization-code/PKCE S256" if pkce_mode else "direct-grant")
+            + " JWTs issued to distinct temporary accounts", flush=True,
+        )
+        if pkce_mode:
+            code, verifier = authorization_code(
+                base_url=keycloak, public_base=public, realm=REALM,
+                client_id=client_id, redirect_uri=callback_uri,
+                username=users[0], password=user_passwords[0],
+            )
+            altered = ("A" if verifier[0] != "A" else "B") + verifier[1:]
             status, value = request(
                 keycloak + f"/realms/{REALM}/protocol/openid-connect/token",
                 "POST", {"client_id": client_id, "client_secret": client_secret,
-                         "grant_type": "password", "username": user,
-                         "password": password}, form=True)
-            expect(status, 200, "Issue real user JWT", value)
-            tokens.append(value["access_token"])
-        print("[PASS] Three real Keycloak JWTs issued to distinct temporary accounts",
-              flush=True)
+                         "grant_type": "authorization_code", "code": code,
+                         "redirect_uri": callback_uri, "code_verifier": altered},
+                form=True,
+            )
+            if status != 400:
+                raise AssertionError("Keycloak accepted mismatched S256 PKCE verifier")
+            print("[PASS] Incorrect PKCE verifier was refused", flush=True)
+            status, value = request(
+                keycloak + f"/realms/{REALM}/protocol/openid-connect/token",
+                "POST", {"client_id": client_id, "client_secret": client_secret,
+                         "grant_type": "password", "username": users[0],
+                         "password": user_passwords[0]}, form=True,
+            )
+            if status not in (400, 401, 403):
+                raise AssertionError("Temporary PKCE client accepted password grant")
+            print("[PASS] PKCE-only client refused direct password grant", flush=True)
 
         # Ensure an independent runtime root and a non-root staging gateway.
         stage_root = Path(tempfile.mkdtemp(prefix="hb-oauth-stage-"))
@@ -499,7 +550,8 @@ def main():
         status, _, _ = mcp_call(gateway_port, tokens[2], "browser_status")
         expect(status, 503, "Third account capacity limit")
         print("[PASS] Third valid Keycloak account denied at session capacity", flush=True)
-        print("[RESULT] OAuth two-user isolation staging smoke PASSED", flush=True)
+        print("[RESULT] " + ("PKCE S256 " if pkce_mode else "")
+              + "OAuth two-user isolation staging smoke PASSED", flush=True)
 
     finally:
         if site is not None:
