@@ -269,6 +269,103 @@ def _pace_navigation(host: str) -> None:
 
 
 
+
+# A bounded navigation-only workflow may pause for manual user authentication.
+# This manager holds no passwords, CAPTCHA answers or persistent browser profile.
+from workflow_engine import WorkflowManager, safe_public_url
+
+
+def _workflow_gate(target_id: str) -> dict:
+    """Verify the same GUI tab, its public URL and current access state."""
+    target = _target(target_id)
+    url = target.get("url", "")
+    if not safe_public_url(url):
+        return {"state": "unsafe_page"}
+    current = browser_page_text(target_id=target_id, max_chars=2500)
+    status = current.get("access_status")
+    if status == "restricted":
+        return {"state": "restricted"}
+    if status == "verification_required":
+        return {"state": "verification_required"}
+    vstate = _verification_state(target_id)
+    if vstate.get("verification_reason"):
+        return {"state": "verification_required"}
+    actual_url = current.get("url", url)
+    hostname = (urlsplit(actual_url).hostname or "").lower()
+    pathname = (urlsplit(actual_url).path or "").lower()
+    # Login belongs to the user. Never press sign-in or fill credentials.
+    if ("login" in hostname.split(".") or
+            pathname.startswith(("/login", "/signin", "/auth/login", "/nidlogin"))):
+        return {"state": "login_required"}
+    if not safe_public_url(actual_url):
+        return {"state": "unsafe_page"}
+    return {"state": "ok"}
+
+
+def _workflow_execute(target_id: str, step: dict) -> dict:
+    """Dispatch only the explicitly whitelisted browsing operations."""
+    op = step["op"]
+    if op == "navigate":
+        result = browser_navigate(url=step["url"], target_id=target_id)
+        return {"ok": bool(result.get("navigation_started")),
+                "next_target_id": result.get("target_id", target_id)}
+    if op == "wait":
+        result = browser_wait_for(
+            selector=step.get("selector"), text=step.get("text"),
+            timeout_seconds=step["timeout_seconds"], target_id=target_id,
+        )
+        return {"ok": bool(result.get("ok"))}
+    if op == "scroll":
+        result = browser_scroll(
+            direction=step["direction"], pixels=step["pixels"],
+            target_id=target_id,
+        )
+        return {"ok": bool(result.get("ok")), "moved": result.get("moved")}
+    target = _target(target_id)
+    host = urlsplit(target.get("url", "")).hostname
+    if host:
+        _pace_navigation(host.lower())
+    if op == "click_link":
+        arguments = {
+            key: value for key, value in step.items()
+            if key in {"selector", "text", "container_selector"}
+        }
+        return _gui_action(target, "safe_link", arguments)
+    if op == "search":
+        return _gui_action(
+            target, "safe_search", {
+                "selector": step["selector"], "text": step["text"],
+            }
+        )
+    raise ValueError("Unsupported workflow operation")
+
+
+_workflows = WorkflowManager(_workflow_gate, _workflow_execute)
+
+
+@mcp.tool()
+def browser_workflow_start(steps: list[dict], target_id: str) -> dict:
+    """Run up to three of eight whitelisted browsing steps. Pause at challenges.
+
+    Operations: navigate public URL, GET search, safe link click, wait, scroll.
+    Payments, state-changing submissions, credential entry and CAPTCHA solving
+    are never run by workflows. Next batches need an explicit resume call.
+    """
+    return _workflows.start(steps, target_id)
+
+
+@mcp.tool()
+def browser_workflow_resume(workflow_id: str) -> dict:
+    """After manual verification, resume next safe steps, never replaying clicks."""
+    return _workflows.resume(workflow_id)
+
+
+@mcp.tool()
+def browser_workflow_status(workflow_id: str) -> dict:
+    """Inspect a bounded workflow and its next step without executing actions."""
+    return _workflows.get(workflow_id)
+
+
 @mcp.tool()
 def browser_status() -> dict:
     """Check whether HackBrowser exposes a local Chrome DevTools Protocol endpoint."""
@@ -656,6 +753,9 @@ def browser_screenshot(target_id: str | None = None) -> list[TextContent | Image
         selected = _target(target_id)
         state = _verification_state(selected["id"])
         metadata["target_id"] = selected["id"]
+        paused = _workflows.paused_for_target(selected["id"])
+        if paused:
+            metadata["paused_workflow"] = paused
         if state.get("verification_completed"):
             metadata["verification_status"] = "completed"
         if state.get("verification_reason"):
