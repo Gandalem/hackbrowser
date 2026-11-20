@@ -77,7 +77,33 @@ try:
             raise RuntimeError("Screenshot download did not return HTTP 200 PNG")
     if downloaded != png:
         raise RuntimeError("Downloaded screenshot differs from inline MCP PNG")
-    print(f"[PASS] hackbrowser/browser_screenshot inline + downloaded PNG ({len(png)} bytes)")
+    # Also exercise Caddy. The loopback gateway can succeed while an obsolete
+    # Caddyfile still denies /captures/* with HTTP 403.
+    import subprocess
+    import tempfile
+    from pathlib import Path
+    caddy_config = (ROOT / "runtime/caddy/Caddyfile").read_text()
+    caddy_site = caddy_config.splitlines()[0].strip()
+    if 'handle /captures/*' not in caddy_config:
+        raise RuntimeError("Caddy screenshot route is absent")
+    with tempfile.TemporaryDirectory() as tmp:
+        output = str(Path(tmp) / "screenshot.png")
+        curl_args = ["curl", "--noproxy", "*", "--fail", "--silent", "--show-error",
+                     "--max-time", "15", "--output", output]
+        if caddy_site.startswith(":8088"):
+            # Local/external mode: the public TLS proxy forwards to host port 8088.
+            curl_args += ["--header", f"Host: {parsed.netloc}",
+                          "http://127.0.0.1:8088" + parsed.path]
+        else:
+            # Public mode: exercise the localhost TLS listener with correct SNI.
+            if parsed.scheme != "https" or not parsed.hostname:
+                raise RuntimeError("Invalid public screenshot URL")
+            curl_args += ["--resolve", f"{parsed.hostname}:443:127.0.0.1",
+                          download_url]
+        check = subprocess.run(curl_args, capture_output=True, text=True, timeout=20)
+        if check.returncode != 0 or not Path(output).exists() or Path(output).read_bytes() != png:
+            raise RuntimeError("Caddy screenshot download check failed")
+    print(f"[PASS] hackbrowser/browser_screenshot inline + gateway + Caddy PNG ({len(png)} bytes)")
 except Exception as exc:
     errors.append(f"hackbrowser/browser_screenshot: {exc}")
     print(f"[FAIL] hackbrowser/browser_screenshot: {exc}")
