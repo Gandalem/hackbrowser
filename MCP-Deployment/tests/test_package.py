@@ -76,7 +76,7 @@ class SourceTests(unittest.TestCase):
                     and d.func.value.id == "mcp" and d.func.attr == "tool"
                     for d in node.decorator_list)
         ]
-        # All 8 browser actions must remain ordinary MCP tools, even if a
+        # All browser actions must remain ordinary MCP tools, even if a
         # separate Apps extension serves their ui:// screenshot template.
         app_exported = [
             node.name for node in tree.body
@@ -86,8 +86,8 @@ class SourceTests(unittest.TestCase):
                     and d.func.value.id == "apps" and d.func.attr == "tool"
                     for d in node.decorator_list)
         ]
-        self.assertEqual(len(exported), 11)
-        for name in ("browser_screenshot", "browser_keypress", "browser_scroll", "browser_wait_for"):
+        self.assertEqual(len(exported), 12
+        for name in ("browser_screenshot", "browser_keypress", "browser_scroll", "browser_wait_for", "browser_submit_verification"):
             self.assertIn(name, exported)
         self.assertEqual(app_exported, [])
 
