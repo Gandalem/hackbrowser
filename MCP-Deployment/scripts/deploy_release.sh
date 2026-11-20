@@ -70,7 +70,7 @@ cp "$SOURCE/status.sh" "$ROOT/status.sh"
 cp "$SOURCE/install.sh" "$ROOT/install.sh"
 # Re-render runtime Caddy routes on every source release. Merely copying
 # render_config.py and running "compose up -d" leaves a running container on
-# its previous config, which caused /captures/* to return 403 Forbidden.
+# its previous config, so source changes must be applied explicitly.
 (
   set -a
   # shellcheck disable=SC1091
