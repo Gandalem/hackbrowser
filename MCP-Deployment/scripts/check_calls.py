@@ -2,7 +2,6 @@
 """Execute one harmless real MCP tool call per backend via the local share gateway."""
 import json
 import runpy
-import sys
 from pathlib import Path
 
 ROOT = Path("/opt/mcp-deployment")
