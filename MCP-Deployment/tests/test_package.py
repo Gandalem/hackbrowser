@@ -86,12 +86,14 @@ class SourceTests(unittest.TestCase):
                     and d.func.value.id == "apps" and d.func.attr == "tool"
                     for d in node.decorator_list)
         ]
-        self.assertEqual(len(exported), 22)
+        self.assertEqual(len(exported), 26)
         for name in ("browser_screenshot", "browser_keypress", "browser_scroll", "browser_wait_for", "browser_submit_verification", "browser_verification_click",
                      "browser_click_text", "browser_fill_and_submit", "browser_click_at",
                      "browser_workflow_start", "browser_workflow_resume",
                      "browser_workflow_status", "browser_close_tabs",
-                     "browser_observe", "browser_act"):
+                     "browser_observe", "browser_act",
+                     "browser_handoff_begin", "browser_handoff_status",
+                     "browser_handoff_input", "browser_handoff_end"):
             self.assertIn(name, exported)
         self.assertEqual(app_exported, [])
 
