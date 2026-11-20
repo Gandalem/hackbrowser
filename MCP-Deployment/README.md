@@ -123,7 +123,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
   http://127.0.0.1:8088/pocmap/mcp
 ```
 
-기대 결과: `/healthz`는 **200**, 인증 없는 `/pocmap/mcp`는 **401**, MCP 도구 검색은 PocMap 22 / HackBrowser 20 / ZAP 17개입니다. `check_calls.py`는 세 백엔드의 실제 호출과 HackBrowser PNG 이미지 블록을 확인합니다.
+기대 결과: `/healthz`는 **200**, 인증 없는 `/pocmap/mcp`는 **401**, MCP 도구 검색은 PocMap 22 / HackBrowser 22 / ZAP 17개입니다. `check_calls.py`는 세 백엔드의 실제 호출과 HackBrowser PNG 이미지 블록을 확인합니다.
 
 ## HackBrowser 스크린샷 미리보기 및 PNG 다운로드
 
@@ -157,12 +157,20 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 `browser_close_tabs(target_ids, keep_one_blank=true)`는 `browser_tabs()`가 반환한 정확한 탭 ID만 닫습니다. 전부 닫을 때는 빈 `about:blank` 탭을 하나 새로 만들어 Chromium GUI와 CDP 9223을 유지합니다. 브라우저 프로필, 로그인 쿠키, 저장된 계정은 삭제하지 않습니다. 실패한 종료는 현재 탭 목록을 다시 조회해 확인합니다.
 
+## AI용 Observe → Act (공개 베타)
+
+`browser_observe(target_id, max_elements=35)`는 현재 GUI 탭에서 보이는 링크·버튼·입력 컨트롤을 `e1`, `e2` 같은 단기 참조로 반환합니다. 긴 CSS 선택자를 추측할 필요가 없습니다. 응답에는 `snapshot_id`, 제목, 짧은 본문, 요소의 역할·이름이 포함되며 입력칸 값은 수집하지 않습니다.
+
+`browser_act(snapshot_id, ref, action, text?, target_id?)`는 90초 이내의 최신 참조에 대해서만 실행합니다. 지원 동작은 `click`(안전한 공개 링크·인식된 탐색 버튼), `fill`(검색어 입력), `search`(GET 검색 폼)입니다. 페이지·요소가 변경되면 중단하고 재관찰을 요구합니다. 결제·삭제·계정 변경·파일 업로드·비밀번호 입력·CAPTCHA 자동 해결은 지원하지 않습니다. 실패한 클릭을 자동 반복하지 않습니다. 기존 개별 조작 도구는 호환성을 위해 유지합니다.
+
+브라우저만 설치하는 개발자는 최상위 `standalone/compose.yml`을 사용하면 됩니다. 단독 구성은 로컬 MCP 전용으로 인증이 없으므로 인터넷에 공개하면 안 됩니다. 서버 전체 설치와 OCI OAuth 구성은 기존 방법을 유지합니다.
+
 ## Playwright GUI 조작 엔진
 
 좌표 클릭 도구는 Playwright Python `mouse.click(x, y)`를 사용하며, 뷰포트 바깥 좌표는 거부합니다. 텍스트가 여러 요소에 중복 매칭되면 첫 요소를 임의로 클릭하지 않고 `ok:false`와 일치 개수를 반환합니다. 텍스트 클릭 실패 시 `browser_elements`에서 특정 CSS 선택자를 확인하세요.
 
 
-Playwright는 **이미 실행 중인 GUI Chromium의 로컬 CDP 9223**에만 연결합니다. 새 브라우저/프로필을 생성하거나 로그인 쿠키를 초기화하지 않습니다. 기존 13개 도구는 유지하고, 아래 도구 3개가 추가되어 HackBrowser는 기존 16개 도구와 신규 워크플로 3개로 총 20개입니다.
+Playwright는 **이미 실행 중인 GUI Chromium의 로컬 CDP 9223**에만 연결합니다. 새 브라우저/프로필을 생성하거나 로그인 쿠키를 초기화하지 않습니다. 기존 13개 도구는 유지하고, 아래 도구 3개가 추가되어 HackBrowser는 기존 16개 도구와 신규 워크플로 3개로 총 22개입니다.
 
 - `browser_click`: Playwright 실제 클릭, 동작 가능 여부 대기, URL/새 탭 감지
 - `browser_fill`: 실제 입력 이벤트와 입력 유지 여부 검사(비밀번호 및 본문 내용은 응답하지 않음)
