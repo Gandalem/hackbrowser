@@ -18,6 +18,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 import websocket
 from mcp.server import MCPServer
+from mcp.server.apps import Apps
 from mcp.types import ImageContent, TextContent
 
 CDP_PORT = int(os.environ.get("HACKBROWSER_CDP_PORT", "9222"))
@@ -28,8 +29,16 @@ SCREENSHOT_DIR = Path(os.environ.get("HACKBROWSER_SCREENSHOT_DIR", str(Path.home
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+SCREENSHOT_UI_URI = "ui://hackbrowser/screenshot.html"
+SCREENSHOT_UI_MIME = "text/html;profile=mcp-app"
 
-mcp = MCPServer("HackBrowser Local CDP Bridge")
+apps = Apps()
+apps.add_html_resource(
+    SCREENSHOT_UI_URI,
+    Path(__file__).with_name("screenshot_widget.html").read_text(encoding="utf-8"),
+    title="HackBrowser screenshot preview",
+)
+mcp = MCPServer("HackBrowser Local CDP Bridge", extensions=[apps])
 _opener = build_opener(ProxyHandler({}))
 
 
@@ -220,7 +229,7 @@ def browser_fill(selector: str, value: str, target_id: str | None = None) -> dic
     return result if isinstance(result, dict) else {"result": result}
 
 
-@mcp.tool()
+@apps.tool(resource_uri=SCREENSHOT_UI_URI, meta={"openai/outputTemplate": SCREENSHOT_UI_URI})
 def browser_screenshot(target_id: str | None = None) -> list[TextContent | ImageContent]:
     """Capture a PNG, save a private local copy and return the image inline to the MCP client."""
     result = _cdp("Page.captureScreenshot", {"format": "png"}, target_id)

@@ -55,6 +55,31 @@ class ScreenshotTests(unittest.TestCase):
             self.assertIsInstance(result3[1], ImageContent)
 
 
+    def test_screenshot_mcp_ui_metadata_and_resource(self):
+        import ast
+        server = SERVER.read_text()
+        tree = ast.parse(server)
+        nodes = {node.name: node for node in tree.body
+                 if isinstance(node, ast.FunctionDef)}
+        screenshot = nodes["browser_screenshot"]
+        ui_decorators = [d for d in screenshot.decorator_list
+                         if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                         and d.func.attr == "tool"]
+        self.assertEqual(len(ui_decorators), 1)
+        meta = next(k.value for k in ui_decorators[0].keywords if k.arg == "meta")
+        self.assertIsInstance(meta, ast.Dict)
+        self.assertIn('openai/outputTemplate', ast.unparse(meta))
+        self.assertIn('resource_uri=SCREENSHOT_UI_URI', ast.unparse(ui_decorators[0]))
+        self.assertIn('ui://hackbrowser/screenshot.html', server)
+        html = SERVER.with_name("screenshot_widget.html").read_text(encoding="utf-8")
+        self.assertIn("ui/initialize", html)
+        self.assertEqual(browser.SCREENSHOT_UI_MIME, "text/html;profile=mcp-app")
+        self.assertIn("ui/notifications/tool-result", html)
+        self.assertIn("data:image/png;base64,", html)
+        self.assertIn("PNG 다운로드", html)
+        self.assertNotIn("<script src=", html)
+        self.assertNotIn("<img src=", html)
+
     def test_invalid_base64_does_not_create_a_file(self):
         with tempfile.TemporaryDirectory() as directory:
             with mock.patch.object(browser, "SCREENSHOT_DIR", Path(directory)), \

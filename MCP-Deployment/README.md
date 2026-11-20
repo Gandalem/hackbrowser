@@ -131,6 +131,12 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 이 URL은 **파일 다운로드용 대체 경로**이며, ChatGPT가 자동으로 PNG를 채팅 첨부파일로 등록하는 기능을 보장하지 않습니다. 사용 중인 ChatGPT 클라이언트에서 별도로 확인해야 합니다. 이전과 동일하게 사용자 데이터가 포함된 화면을 캡처할 수 있으므로 캡처 URL을 공유하지 마세요.
 
+## ChatGPT 스크린샷 인라인 미리보기 (실험적)
+
+`browser_screenshot`에 MCP Apps UI 메타데이터(`ui.resourceUri` 및 `openai/outputTemplate`)와 자체 HTML 이미지 뷰어(`ui://hackbrowser/screenshot.html`)를 추가했습니다. UI 호스트가 MCP Apps 리소스를 표시한다면 **외부의 만료되는 `/captures/*` URL 대신 MCP `ImageContent`의 PNG 바이트**로 화면을 표시하고, 이미지 뷰어 내에서 PNG를 저장할 수 있습니다. 기존 PNG 데이터 블록과 다운로드 링크는 그대로 유지됩니다.
+
+**주의:** 일반 ChatGPT MCP 커넥터가 이 UI 메타데이터를 지원하는지는 호스트 버전·설정에 따라 달라질 수 있습니다. UI가 나타나지 않으면 기존 이미지 데이터와 다운로드 링크만 사용 가능합니다. 뷰어에서 사용 가능한 `uploadFile` 기능이 있더라도 이는 ChatGPT 파일 저장 기능으로, 일반 채팅 메시지에 자동 첨부됨을 보장하지 않습니다. 재연결 후 실제 ChatGPT 화면에서 검증해야 합니다.
+
 ## 스크린샷 한글 폰트 깨짐(□) 해결
 
 새 설치 시 `install.sh`가 `fonts-noto-cjk`·`fonts-nanum`·`fontconfig`를 설치하고 한국어 글꼴 인식을 검사합니다. 기존 서버는 **재설치하거나 계정을 초기화할 필요 없이** 다음 릴리스 배포 과정에서 `scripts/ensure_korean_fonts.sh`를 실행하고 `mcpstack-chromium.service`를 재시작하도록 수정했습니다.

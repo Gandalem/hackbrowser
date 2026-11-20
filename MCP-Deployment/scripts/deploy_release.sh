@@ -27,6 +27,10 @@ done
 if ! cmp -s "$SOURCE/services/hackbrowser/requirements.txt" "$ROOT/services/hackbrowser/requirements.txt"; then
   echo "Python dependencies changed: installer review required" >&2; exit 1
 fi
+# This release adds an MCP Apps UI. Verify SDK support before touching live
+# source or restarting systemd; fail safely if an older venv lacks the module.
+"$ROOT/runtime/venv-hackbrowser/bin/python" -c "from mcp.server.apps import Apps"
+
 BACKUP="$(mktemp -d /opt/mcp-deployment-rollback.XXXXXX)"
 for item in services scripts templates docs docker-compose.yml status.sh install.sh; do
   [[ ! -e "$ROOT/$item" ]] || cp -a "$ROOT/$item" "$BACKUP/"
@@ -80,6 +84,9 @@ chmod 0755 "$ROOT/services/hackbrowser/start_chromium_headless.sh"
 # Install/check Hangul fonts before restarting the renderer so Chrome sees them.
 bash "$ROOT/scripts/ensure_korean_fonts.sh"
 "$ROOT/runtime/venv-hackbrowser/bin/python" -m py_compile "$ROOT/services/hackbrowser/server.py"
+# Exercise actual module initialization: Python compilation alone does not
+# validate extension registration or the ui:// resource on the target SDK.
+"$ROOT/runtime/venv-hackbrowser/bin/python" -c "import runpy; runpy.run_path('$ROOT/services/hackbrowser/server.py', run_name='screenshot_ui_preflight')"
 systemctl restart mcpstack-chromium.service mcpstack-hackbrowser.service mcpstack-share.service
 docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" up -d zap caddy
 # "up -d" alone does not reload a modified bind-mounted Caddyfile.
