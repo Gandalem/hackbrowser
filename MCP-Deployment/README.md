@@ -131,6 +131,12 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 이 URL은 **파일 다운로드용 대체 경로**이며, ChatGPT가 자동으로 PNG를 채팅 첨부파일로 등록하는 기능을 보장하지 않습니다. 사용 중인 ChatGPT 클라이언트에서 별도로 확인해야 합니다. 이전과 동일하게 사용자 데이터가 포함된 화면을 캡처할 수 있으므로 캡처 URL을 공유하지 마세요.
 
+## 스크린샷 한글 폰트 깨짐(□) 해결
+
+새 설치 시 `install.sh`가 `fonts-noto-cjk`·`fonts-nanum`·`fontconfig`를 설치하고 한국어 글꼴 인식을 검사합니다. 기존 서버는 **재설치하거나 계정을 초기화할 필요 없이** 다음 릴리스 배포 과정에서 `scripts/ensure_korean_fonts.sh`를 실행하고 `mcpstack-chromium.service`를 재시작하도록 수정했습니다.
+
+서버에 직접 확인할 때는 `sudo bash /opt/mcp-deployment/scripts/ensure_korean_fonts.sh --check`를 실행합니다. `[PASS] Headless Chromium Korean fonts available`이면 운영 계정에서 한국어 폰트를 찾을 수 있다는 의미입니다. 이후 한국어가 포함된 웹페이지를 다시 캡처해 실제 렌더링을 확인하세요. 폰트가 잡혀도 웹사이트 자체의 CSS·문자 인코딩 문제는 별도로 점검해야 합니다.
+
 ## 문제 해결
 
 | 현상 | 점검 |
