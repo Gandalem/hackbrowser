@@ -8,11 +8,13 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 import queue
 import threading
+import time
 from concurrent.futures import Future
 
 ACTION_TIMEOUT_MS = 10000
 CONNECT_TIMEOUT_MS = 8000
 SETTLE_MS = 650
+POST_ACTION_WAIT_SECONDS = 2.0
 
 
 def _find_page(context, selected: dict):
@@ -78,6 +80,7 @@ def _choose_text_locator(page, text: str, role: str, exact: bool):
 def _run_connected(browser, selected: dict, action: str, args: dict,
                    list_targets) -> dict:
     """Apply exactly one action with a Playwright connection owned by the worker."""
+    from playwright.sync_api import Error as PlaywrightError, TimeoutError as PWTimeout
     if not browser.contexts:
         raise RuntimeError("GUI Chromium has no browser context")
     context = browser.contexts[0]
@@ -126,40 +129,44 @@ def _run_connected(browser, selected: dict, action: str, args: dict,
     if action == "fill":
         return result
 
-    try:
-        page.wait_for_timeout(SETTLE_MS)
-    except PlaywrightError:
-        pass  # The click may have closed/navigated the original tab.
-    after_targets = _safe_targets(list_targets)
-    new_tabs = [
-        {"target_id": item["id"], "url": item.get("url", ""),
-         "title": item.get("title", "")}
-        for item in after_targets
-        if item.get("id") not in before_ids
-    ]
-    after_url = None if page.is_closed() else page.url
-    changed = bool(after_url != before_url)
+    # Single-page applications may change location before their new UI commits.
+    # Wait only for read-only observations; never click again to force a result.
+    deadline = time.monotonic() + POST_ACTION_WAIT_SECONDS
+    while True:
+        after_targets = _safe_targets(list_targets)
+        new_tabs = [
+            {"target_id": item["id"], "url": item.get("url", ""),
+             "title": item.get("title", "")}
+            for item in after_targets if item.get("id") not in before_ids
+        ]
+        closed = page.is_closed()
+        after_url = None if closed else page.url
+        after_text = "" if closed else _body_sample(page)
+        changed = after_url != before_url
+        content_changed = before_text != after_text
+        if new_tabs or closed or content_changed or time.monotonic() >= deadline:
+            break
+        try:
+            page.wait_for_timeout(150)
+        except PlaywrightError:
+            break
     result.update({
         "url_before": before_url,
         "url_after": after_url,
         "url_changed": changed,
         "new_tabs": new_tabs,
         "next_target_id": new_tabs[0]["target_id"] if new_tabs else selected["id"],
-        "content_changed": (
-            bool(before_text != _body_sample(page)) if not page.is_closed() else False
-        ),
+        "content_changed": content_changed,
+        "effect_observed": bool(changed or new_tabs or content_changed),
+        "render_pending": bool(changed and not content_changed and not new_tabs),
     })
-    result["effect_observed"] = bool(
-        result["url_changed"] or result["new_tabs"] or result["content_changed"]
-    )
     return result
-
 
 class _GuiWorker:
     """Single owner of sync Playwright. Calls are serialized; session is reused."""
 
     def __init__(self):
-        self.jobs = queue.Queue(maxsize=64)
+        self.jobs = queue.Queue(maxsize=16)
         self.lock = threading.Lock()
         self.thread = None
         self.started = 0
@@ -175,10 +182,17 @@ class _GuiWorker:
         try:
             self.jobs.put_nowait((result, cdp_root, selected, action, args, list_targets))
         except queue.Full:
-            raise RuntimeError("GUI browser action queue is full")
+            raise RuntimeError("GUI browser action queue is full; no action was enqueued")
         # Wait long enough for one 10s action plus a potential pre-action
         # reconnection. A timed-out action must never be implicitly retried.
-        return result.result(timeout=35)
+        try:
+            return result.result(timeout=35)
+        except TimeoutError:
+            # Even a cancelled response may have performed its action.
+            # Never repeat it automatically.
+            return {"ok": False, "action": action, "target_id": selected["id"],
+                    "error": "GUI worker timed out; inspect before retrying",
+                    "retry_safe": False}
 
     def _run(self):
         from playwright.sync_api import sync_playwright
@@ -212,7 +226,7 @@ def _validate_cdp(cdp_root: str) -> None:
     parsed = urlsplit(cdp_root)
     if (parsed.scheme != "http" or parsed.hostname != "127.0.0.1"
             or parsed.port != 9223 or parsed.path not in {"", "/"}
-            or parsed.username or parsed.password):
+            or parsed.username or parsed.password or parsed.query or parsed.fragment):
         raise RuntimeError("Only the managed local GUI Chromium CDP 9223 is allowed")
 
 
