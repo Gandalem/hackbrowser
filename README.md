@@ -4,7 +4,7 @@
 
 A self-hosted **GUI Chromium browser** for MCP agents. Let an AI browse real pages via Playwright and CDP, view screenshots in ChatGPT, and pause when a person needs to handle a login or verification. No remote browser-cloud account required.
 
-> **Public beta:** Works with an existing GUI Chromium instance on Linux. The local Docker path below is new and requires runtime validation on your host. The project does not yet offer isolated multi-user sessions or fully automatic CAPTCHA handoff.
+> **Public beta:** Works with an existing GUI Chromium instance on Linux. The local Docker path below is new and requires runtime validation on your host. Single-user mode is the default. An **experimental** OAuth per-user browser mode is available but still needs OCI two-account validation; it is not hardened container isolation. Fully automatic CAPTCHA handoff is not supported.
 
 [Standalone browser](standalone/README.md) · [Full server + OAuth](MCP-Deployment/README.md) · [MCP tools](docs/TOOLS.md) · [Demo walkthrough](docs/DEMO.md) · [Releases](https://github.com/Gandalem/hackbrowser/releases)
 
@@ -17,6 +17,7 @@ A self-hosted **GUI Chromium browser** for MCP agents. Let an AI browse real pag
 | 3 | **Human-assisted verification** | Screenshot MCP App can relay manual CAPTCHA input or clicks, without automated solving |
 | 4 | **Conservative workflows** | Up to 8 safe browsing steps; pause on login/verification; explicit resume |
 | 5 | **Self-hosted** | Choose a local-only Docker browser or full Linux systemd/OAuth deployment |
+| 6 | **Optional per-user browsers (experimental)** | Separate Xvfb, Chromium profile and MCP bridge for verified OAuth users, with capacity limits |
 
 ### Quickstart: browser only (Linux Docker)
 
@@ -69,7 +70,7 @@ Use the [full installation and authentication guide](MCP-Deployment/README.md) f
 - CI checks Python syntax, unit tests and MCP tool discovery. **ARM64 standalone Docker built and started successfully in GitHub Actions; other architectures/hosts still require verification.**
 - Semantic Observe/Act is new in this beta: it deliberately blocks unknown button actions, unsafe destinations and sensitive form input. Re-observe if a reference expires.
 - CAPTCHA/manual login is performed by a person. An end-to-end real CAPTCHA → workflow resume demonstration remains to be validated.
-- The full server currently **shares one GUI profile across authenticated MCP users**. Do not use it for multiple untrusted users.
+- The full server defaults to **one shared GUI profile**. Optional `BROWSER_SESSION_MODE=isolated` creates per-OAuth-subject browsers and MCP bridge processes; this mode is **not yet verified end-to-end on OCI**, and processes share one Linux account. Do not treat it as a hardened security boundary for untrusted users. See [session isolation setup](MCP-Deployment/services/hackbrowser/SESSION_ISOLATION.md).
 - Host permissions, sites' terms, sandbox configuration, authentication and network boundaries are still the operator's responsibility.
 
 ## Contributing and source
