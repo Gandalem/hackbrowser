@@ -79,6 +79,27 @@ class AccessSafetyTests(unittest.TestCase):
                 server.browser_navigate("https://shopping.naver.com/ns/home")
             cdp.assert_not_called()
 
+    def test_blocked_click_stops_before_script_execution(self):
+        with mock.patch.object(server, "_target", return_value={
+            "id": "abc", "url": "https://search.shopping.naver.com/ns/search?query=test"
+        }), mock.patch.object(server, "_evaluate") as evaluate:
+            server._record_restriction(
+                "https://search.shopping.naver.com/ns/search?query=test")
+            with self.assertRaisesRegex(RuntimeError, "접속 제한"):
+                server.browser_click("a.result")
+            evaluate.assert_not_called()
+
+    def test_repeat_blocked_page_read_does_not_extend_cooldown(self):
+        with mock.patch.object(server.time, "monotonic", return_value=100):
+            server._record_restriction(
+                "https://search.shopping.naver.com/ns/search?query=test")
+        first = server._restricted_until["shopping.naver.com"]
+        with mock.patch.object(server.time, "monotonic", return_value=200):
+            remaining = server._record_restriction(
+                "https://search.shopping.naver.com/ns/search?query=test")
+        self.assertEqual(remaining, 1701)
+        self.assertEqual(first, server._restricted_until["shopping.naver.com"])
+
     def test_normal_navigation_still_works(self):
         with mock.patch.object(server, "_target", return_value={"id": "abc"}), \
              mock.patch.object(server, "_cdp", return_value={}) as cdp:
