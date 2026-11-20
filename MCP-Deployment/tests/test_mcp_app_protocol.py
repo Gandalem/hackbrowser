@@ -28,6 +28,8 @@ def rpc(port: int, method: str, params: dict) -> dict:
         "Mcp-Method": method,
         "MCP-Protocol-Version": "2026-07-28",
     }
+    if method == "resources/read":
+        headers["Mcp-Name"] = params["uri"]
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/mcp",
         data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
