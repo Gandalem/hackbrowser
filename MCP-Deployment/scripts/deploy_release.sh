@@ -31,6 +31,12 @@ BACKUP="$(mktemp -d /opt/mcp-deployment-rollback.XXXXXX)"
 for item in services scripts templates docs docker-compose.yml status.sh install.sh; do
   [[ ! -e "$ROOT/$item" ]] || cp -a "$ROOT/$item" "$BACKUP/"
 done
+# Caddyfile lives in persistent runtime, outside the versioned source copy.
+# Preserve its previous working contents so a failed deployment can roll back.
+if [[ -f "$ROOT/runtime/caddy/Caddyfile" ]]; then
+  mkdir -p "$BACKUP/runtime/caddy"
+  cp -p "$ROOT/runtime/caddy/Caddyfile" "$BACKUP/runtime/caddy/Caddyfile"
+fi
 rollback() {
   local code=$?
   trap - ERR
@@ -38,11 +44,15 @@ rollback() {
   for item in services scripts templates docs docker-compose.yml status.sh install.sh; do
     [[ ! -e "$BACKUP/$item" ]] || cp -a "$BACKUP/$item" "$ROOT/"
   done
+  if [[ -f "$BACKUP/runtime/caddy/Caddyfile" ]]; then
+    cp -p "$BACKUP/runtime/caddy/Caddyfile" "$ROOT/runtime/caddy/Caddyfile"
+  fi
   systemctl restart mcpstack-hackbrowser.service mcpstack-share.service || true
   if systemctl is-enabled --quiet mcpstack-oauth.service; then
     systemctl restart mcpstack-oauth.service || true
   fi
   docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" up -d zap caddy || true
+  docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" exec -T caddy caddy reload --config /etc/caddy/Caddyfile || true
   echo "Restored files from $BACKUP. Verify service status." >&2
   exit "$code"
 }
@@ -54,6 +64,17 @@ cp -a "$SOURCE/docs/." "$ROOT/docs/"
 cp "$SOURCE/docker-compose.yml" "$ROOT/docker-compose.yml"
 cp "$SOURCE/status.sh" "$ROOT/status.sh"
 cp "$SOURCE/install.sh" "$ROOT/install.sh"
+# Re-render runtime Caddy routes on every source release. Merely copying
+# render_config.py and running "compose up -d" leaves a running container on
+# its previous config, which caused /captures/* to return 403 Forbidden.
+(
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT/runtime/private.env"
+  set +a
+  MCP_INSTALL_ROOT="$ROOT" python3 "$ROOT/scripts/render_config.py"
+)
+docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile
 chmod 0755 "$ROOT/services/hackbrowser/start_chromium_headless.sh"
 # Upgrade already-running VMs without reinstalling or resetting MCP credentials.
 # Install/check Hangul fonts before restarting the renderer so Chrome sees them.
@@ -61,6 +82,8 @@ bash "$ROOT/scripts/ensure_korean_fonts.sh"
 "$ROOT/runtime/venv-hackbrowser/bin/python" -m py_compile "$ROOT/services/hackbrowser/server.py"
 systemctl restart mcpstack-chromium.service mcpstack-hackbrowser.service mcpstack-share.service
 docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" up -d zap caddy
+# "up -d" alone does not reload a modified bind-mounted Caddyfile.
+docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" exec -T caddy caddy reload --config /etc/caddy/Caddyfile
 # The release must apply updated Compose networking to active OAuth installations.
 # Updating the file alone leaves the old internal-only Keycloak container running.
 if grep -q '^ENABLE_OAUTH=1$' "$ROOT/runtime/private.env"; then
