@@ -1,4 +1,4 @@
-# MCP 도구 레퍼런스 (PocMap 22 · HackBrowser 12 · ZAP 17)
+# MCP 도구 레퍼런스 (PocMap 22 · HackBrowser 19 · ZAP 17)
 
 [프로젝트 설치](../README.md) · [운영 및 계정 관리](../MCP-Deployment/README.md)
 
@@ -9,7 +9,7 @@
 | MCP | 기능 | 도구 |
 |---|---|---:|
 | **PocMap** | CVE·PoC·취약점 정보 조회 | 22개 |
-| **HackBrowser MCP** | Chromium 브라우저 제어 | 12개 |
+| **HackBrowser MCP** | Chromium 브라우저 제어 | 19개 |
 | **OWASP ZAP MCP** | 웹 진단·스캔·HTTP 이력·보고서 | 17개 |
 
 <details>
@@ -46,7 +46,7 @@
 </details>
 
 <details>
-<summary><b>HackBrowser MCP — Chromium 브라우저 제어 도구 12개</b></summary>
+<summary><b>HackBrowser MCP — Chromium 브라우저 제어 도구 19개</b></summary>
 
 | 도구 | 기능 | 주요 입력·참고 |
 |---|---|---|
@@ -112,3 +112,11 @@ sudo python3 /opt/mcp-deployment/scripts/check_calls.py
 - `browser_fill_and_submit(selector, value, key, target_id)`: fill then press Enter once and verify change
 - `browser_click_at(x, y, target_id)`: click GUI viewport coordinates once for ordinary interactions, not CAPTCHA solving
 - `browser_click` and `browser_fill` use Playwright's actionability checks, reporting observed URL/content changes and newly opened tabs. CDP 9223 is reused; no profile reinitialization.
+
+### 안전한 GUI 워크플로 (HackBrowser)
+
+- `browser_workflow_start(steps, target_id)`: 공개 HTTPS 탐색, GET 검색, 안전한 링크 클릭, 대기, 스크롤을 최대 8단계 계획으로 묶습니다 (호출당 최대 3단계)
+- `browser_workflow_status(workflow_id)`: 현재 단계 및 중단 사유 확인
+- `browser_workflow_resume(workflow_id)`: 사용자 수동 인증 후 페이지 검증 및 다음 안전한 단계부터 재개
+- 결제·삭제·로그인 정보 입력·CAPTCHA 자동 해결은 실행하지 않음
+
