@@ -68,9 +68,9 @@ jobs:
                       )
                   body = json.loads(raw)
                   names = {t["name"] for t in body["result"]["tools"]}
-                  assert len(names) == 22, names
+                  assert len(names) == 26, names
                   assert {"browser_observe", "browser_act", "browser_screenshot"} <= names
-                  print("PASS: GUI-backed standalone exposed 22 MCP tools")
+                  print("PASS: GUI-backed standalone exposed 26 MCP tools")
                   break
               except Exception as error:
                   if attempt == 89:
