@@ -5,6 +5,7 @@ OAuth routes. Generic AI clients use the time-limited share path instead.
 """
 import asyncio
 import os
+import re
 from contextlib import suppress
 from functools import partial
 from pathlib import Path
@@ -40,6 +41,14 @@ if SESSION_MODE not in {"single", "isolated"}:
     raise ValueError("BROWSER_SESSION_MODE must be single or isolated")
 if SESSION_MODE == "isolated" and os.environ.get("ENABLE_OAUTH") != "1":
     raise RuntimeError("Isolated browser mode requires ENABLE_OAUTH=1")
+OAUTH_GATEWAY_PORT = int(os.environ.get("OAUTH_GATEWAY_PORT", "8787"))
+STAGING_CLIENT = os.environ.get("HACKBROWSER_STAGING_TEST_CLIENT", "")
+if STAGING_CLIENT:
+    if (SESSION_MODE != "isolated" or OAUTH_GATEWAY_PORT == 8787
+            or not 1024 <= OAUTH_GATEWAY_PORT <= 65535
+            or re.fullmatch(r"hb-smoke-[a-z0-9]{12,24}", STAGING_CLIENT) is None):
+        raise ValueError("Staging OAuth test client requires a separate isolated gateway")
+
 
 
 
@@ -67,7 +76,10 @@ def verify_jwt(token, service):
         options={"require": ["iss", "sub", "exp", "aud"]},
         leeway=15,
     )
-    if claims.get("azp") != f"chatgpt-{service}":
+    allowed_clients = {f"chatgpt-{service}"}
+    if service == "hackbrowser" and STAGING_CLIENT:
+        allowed_clients.add(STAGING_CLIENT)
+    if claims.get("azp") not in allowed_clients:
         raise ValueError("OAuth client not authorized for this service")
     if f"mcp:{service}" not in set(str(claims.get("scope", "")).split()):
         raise ValueError("Missing service scope")
@@ -193,4 +205,4 @@ for name in BACKENDS:
     app.router.add_route("*", f"/{name}/mcp", partial(proxy, service=name))
 
 if __name__ == "__main__":
-    web.run_app(app, host="127.0.0.1", port=8787, access_log=None)
+    web.run_app(app, host="127.0.0.1", port=OAUTH_GATEWAY_PORT, access_log=None)
