@@ -368,7 +368,7 @@ def browser_fill(selector: str, value: str, target_id: str | None = None) -> dic
 
 # Named keys only: this MCP tool never accepts raw CDP commands or scripts.
 _KEY_EVENTS = {
-    "Enter": ("Enter", 13, "\\r"),
+    "Enter": ("Enter", 13, "\r"),
     "Tab": ("Tab", 9, None),
     "Escape": ("Escape", 27, None),
     "Backspace": ("Backspace", 8, None),
@@ -426,7 +426,7 @@ def browser_scroll(direction: str = "down", pixels: int = 600,
       var el=%s ? document.querySelector(%s) : document.scrollingElement;
       if(!el)return {ok:false,error:'Scrollable element not found'};
       var before={top:el.scrollTop,left:el.scrollLeft};
-      el.scrollBy({%s:%d,behavior:'instant'});
+      el.scrollBy({%s:%d,behavior:'auto'});
       return {ok:true,before:before,after:{top:el.scrollTop,left:el.scrollLeft}};
     })()""" % (json.dumps(selector is not None), json.dumps(selector), axis, amount)
     result = _evaluate(expression, target["id"])
