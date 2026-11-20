@@ -77,7 +77,30 @@ class ScreenshotTests(unittest.TestCase):
         self.assertIn("ui/initialize", html)
         self.assertEqual(browser.SCREENSHOT_UI_MIME, "text/html;profile=mcp-app")
         self.assertIn("ui/notifications/tool-result", html)
+        self.assertIn("ui/notifications/size-changed", html)
+        self.assertIn("ResizeObserver", html)
+        self.assertIn("applyHostHeightLimit", html)
+        self.assertIn("overflow-x: hidden", html)
+        self.assertIn("max-height: var(--preview-max-height, 440px)", html)
         self.assertIn("data:image/png;base64,", html)
+        # Regression: without the .preview class the source PNG renders at
+        # its intrinsic pixel width, overflowing both axes of the MCP iframe.
+        from html.parser import HTMLParser
+
+        class Images(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.tags = []
+            def handle_starttag(self, tag, attrs):
+                if tag == "img":
+                    self.tags.append(dict(attrs))
+
+        images = Images()
+        images.feed(html)
+        self.assertEqual(len(images.tags), 1)
+        self.assertEqual(images.tags[0].get("id"), "preview")
+        self.assertIn("preview", images.tags[0].get("class", "").split())
+        self.assertIsNone(images.tags[0].get("src"))
         self.assertIn("PNG 다운로드", html)
         self.assertNotIn("<script src=", html)
         self.assertNotIn("<img src=", html)
