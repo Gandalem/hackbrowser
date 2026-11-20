@@ -188,8 +188,9 @@ class _GuiWorker:
         try:
             return result.result(timeout=35)
         except TimeoutError:
-            # Even a cancelled response may have performed its action.
-            # Never repeat it automatically.
+            # Cancel if still queued; if running, execution may have occurred.
+            # Never replay an uncertain browser action.
+            result.cancel()
             return {"ok": False, "action": action, "target_id": selected["id"],
                     "error": "GUI worker timed out; inspect before retrying",
                     "retry_safe": False}
