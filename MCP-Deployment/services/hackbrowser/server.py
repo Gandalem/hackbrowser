@@ -10,6 +10,7 @@ import binascii
 import json
 import os
 import re
+import secrets
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -24,6 +25,7 @@ MCP_PORT = int(os.environ.get("HACKBROWSER_MCP_PORT", "8765"))
 CDP_HOST = "127.0.0.1"
 CDP_ROOT = f"http://{CDP_HOST}:{CDP_PORT}"
 SCREENSHOT_DIR = Path(os.environ.get("HACKBROWSER_SCREENSHOT_DIR", str(Path.home() / "hackbrowser-mcp-screenshots")))
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -238,7 +240,8 @@ def browser_screenshot(target_id: str | None = None) -> list[TextContent | Image
         raise RuntimeError("Screenshot exceeds the 8 MiB limit")
 
     SCREENSHOT_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-    filename = f"hackbrowser-{time.time_ns()}-{os.getpid()}.png"
+    # 192 bits of entropy make the short-lived download URL unguessable.
+    filename = f"hb-{secrets.token_hex(24)}.png"
     output = SCREENSHOT_DIR / filename
     # Create a private file and never overwrite an earlier capture.
     fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -246,6 +249,9 @@ def browser_screenshot(target_id: str | None = None) -> list[TextContent | Image
         capture.write(png)
 
     metadata = {"saved_path": str(output), "bytes": len(png), "mime_type": "image/png"}
+    if PUBLIC_BASE_URL:
+        metadata["download_url"] = f"{PUBLIC_BASE_URL}/captures/{filename}"
+        metadata["expires_in_seconds"] = 600
     return [
         TextContent(type="text", text=json.dumps(metadata)),
         ImageContent(type="image", data=encoded, mime_type="image/png"),

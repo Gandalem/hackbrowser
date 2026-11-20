@@ -35,6 +35,9 @@ handlers = [
     "    handle /share/* {",
     "        reverse_proxy 127.0.0.1:8790",
     "    }",
+    "    handle /captures/* {",
+    "        reverse_proxy 127.0.0.1:8790",
+    "    }",
 ]
 if oauth:
     # The public admin/master realm endpoints are deliberately unavailable.

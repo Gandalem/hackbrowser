@@ -61,7 +61,23 @@ try:
     metadata = json.loads(texts[0]["text"])
     if metadata.get("bytes") != len(png) or not metadata.get("saved_path"):
         raise RuntimeError("Image/file metadata mismatch")
-    print(f"[PASS] hackbrowser/browser_screenshot inline PNG ({len(png)} bytes)")
+    # Verify the gateway serves the same bytes. Never print the capability URL.
+    from urllib.parse import urlsplit
+    from urllib.request import urlopen
+    download_url = metadata.get("download_url", "")
+    parsed = urlsplit(download_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.path.startswith("/captures/hb-"):
+        raise RuntimeError("Missing valid screenshot download URL")
+    if metadata.get("expires_in_seconds") != 600:
+        raise RuntimeError("Unexpected screenshot link expiration")
+    local_url = "http://127.0.0.1:8790" + parsed.path
+    with urlopen(local_url, timeout=10) as response:
+        downloaded = response.read(8 * 1024 * 1024 + 1)
+        if response.status != 200 or response.headers.get_content_type() != "image/png":
+            raise RuntimeError("Screenshot download did not return HTTP 200 PNG")
+    if downloaded != png:
+        raise RuntimeError("Downloaded screenshot differs from inline MCP PNG")
+    print(f"[PASS] hackbrowser/browser_screenshot inline + downloaded PNG ({len(png)} bytes)")
 except Exception as exc:
     errors.append(f"hackbrowser/browser_screenshot: {exc}")
     print(f"[FAIL] hackbrowser/browser_screenshot: {exc}")

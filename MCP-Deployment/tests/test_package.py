@@ -17,7 +17,7 @@ class SourceTests(unittest.TestCase):
             ast.parse(f.read_text(), filename=str(f))
 
     def test_shell_syntax(self):
-        for f in ["install.sh", "uninstall.sh", "status.sh", "renew-share.sh", "scripts/deploy_release.sh"]:
+        for f in ["install.sh", "uninstall.sh", "status.sh", "renew-share.sh", "scripts/deploy_release.sh", "scripts/ensure_korean_fonts.sh"]:
             subprocess.run(["bash", "-n", str(ROOT / f)], check=True)
 
     def test_no_runtime_credentials_bundled(self):
@@ -25,6 +25,25 @@ class SourceTests(unittest.TestCase):
         self.assertFalse((ROOT / "runtime/secrets").exists())
         self.assertFalse(any(ROOT.rglob("*.pem")))
         self.assertFalse(any(ROOT.rglob("*.key")))
+
+    def test_korean_fonts_in_installer_and_existing_server_deployment(self):
+        installer = (ROOT / "install.sh").read_text()
+        deployer = (ROOT / "scripts/deploy_release.sh").read_text()
+        helper = (ROOT / "scripts/ensure_korean_fonts.sh").read_text()
+
+        self.assertIn('bash "$ROOT/scripts/ensure_korean_fonts.sh"', installer)
+        self.assertIn('bash "$ROOT/scripts/ensure_korean_fonts.sh"', deployer)
+        self.assertLess(
+            deployer.index('bash "$ROOT/scripts/ensure_korean_fonts.sh"'),
+            deployer.index("systemctl restart mcpstack-chromium.service"),
+        )
+        self.assertIn("fonts-noto-cjk", helper)
+        self.assertIn("fonts-nanum", helper)
+        self.assertIn("fontconfig", helper)
+        self.assertIn("fc-cache -f", helper)
+        self.assertIn("':lang=ko'", helper)
+        self.assertIn("runuser -u mcpstack --", helper)
+        self.assertIn("apt-get install -y --no-install-recommends", helper)
 
     def test_hackbrowser_tools(self):
         tree = ast.parse((ROOT / "services/hackbrowser/server.py").read_text())
@@ -50,6 +69,8 @@ class SourceTests(unittest.TestCase):
                 content = (Path(td) / "runtime/caddy/Caddyfile").read_text()
                 self.assertTrue(content.startswith(site + " {"))
                 self.assertIn("handle /share/*", content)
+                self.assertIn("handle /captures/*", content)
+                self.assertIn("127.0.0.1:8790", content)
                 self.assertEqual("@oauth_mcp" in content, oauth == "1")
                 self.assertIn("127.0.0.1:8790", content)
 
