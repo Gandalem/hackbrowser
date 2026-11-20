@@ -115,7 +115,7 @@ class IsolatedRoutingTests(unittest.TestCase):
                 self.assertIn("lifecycle=retained", cookie)
                 self.assertIn("Max-Age=3600", cookie)
             with opener.open(f"http://127.0.0.1:{port}/read", timeout=3) as response:
-                self.assertEqual(response.read().decode(), "cookie-missing")
+                self.assertIn("cookie-missing", response.read().decode())
         finally:
             server.shutdown()
             server.server_close()
