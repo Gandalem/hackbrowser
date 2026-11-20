@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import socket
 import subprocess
 import threading
@@ -73,11 +74,17 @@ class SessionPool:
         if session is None:
             return
         if session.process.poll() is None:
-            session.process.terminate()
+            try:
+                os.killpg(session.process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             try:
                 session.process.wait(timeout=4)
             except subprocess.TimeoutExpired:
-                session.process.kill()
+                try:
+                    os.killpg(session.process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 session.process.wait(timeout=3)
         # Profiles persist across idle shutdown; never erase login data here.
 
@@ -112,9 +119,16 @@ class SessionPool:
             env = os.environ.copy()
             if self.display is not None:
                 env["DISPLAY"] = self.display
-            cmd = [self.chromium, "--no-first-run", "--no-default-browser-check",
-                   "--remote-debugging-address=127.0.0.1", f"--remote-debugging-port={port}",
-                   f"--user-data-dir={profile}", "--window-size=1366,900", "about:blank"]
+            chromium_args = [self.chromium, "--no-first-run", "--no-default-browser-check",
+                             "--disable-gpu", "--disable-background-networking",
+                             "--remote-debugging-address=127.0.0.1",
+                             f"--remote-debugging-port={port}",
+                             f"--user-data-dir={profile}", "--window-size=1366,900",
+                             "about:blank"]
+            cmd = chromium_args if self.display is not None else [
+                "xvfb-run", "-a", "-s", "-screen 0 1366x900x24 -nolisten tcp",
+                *chromium_args,
+            ]
             process = subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                        start_new_session=True)
