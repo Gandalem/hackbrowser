@@ -14,7 +14,6 @@ import base64
 import json
 import os
 import shutil
-import socket
 import sys
 import tempfile
 import threading
