@@ -44,6 +44,7 @@ jobs:
           set -o pipefail
           mkdir -p evidence
           python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee evidence/ci-tests.log
+          python -m unittest discover -s services/hackbrowser -p 'test_session_pool.py' -v 2>&1 | tee -a evidence/ci-tests.log
       - name: Validate deploy and smoke scripts
         run: |
           bash -n scripts/deploy_release.sh scripts/package_release.sh
