@@ -1,4 +1,4 @@
-# MCP 도구 레퍼런스 (PocMap 22 · HackBrowser 8 · ZAP 17)
+# MCP 도구 레퍼런스 (PocMap 22 · HackBrowser 11 · ZAP 17)
 
 [프로젝트 설치](../README.md) · [운영 및 계정 관리](../MCP-Deployment/README.md)
 
@@ -9,7 +9,7 @@
 | MCP | 기능 | 도구 |
 |---|---|---:|
 | **PocMap** | CVE·PoC·취약점 정보 조회 | 22개 |
-| **HackBrowser MCP** | Chromium 브라우저 제어 | 8개 |
+| **HackBrowser MCP** | Chromium 브라우저 제어 | 11개 |
 | **OWASP ZAP MCP** | 웹 진단·스캔·HTTP 이력·보고서 | 17개 |
 
 <details>
@@ -46,7 +46,7 @@
 </details>
 
 <details>
-<summary><b>HackBrowser MCP — Chromium 브라우저 제어 도구 8개</b></summary>
+<summary><b>HackBrowser MCP — Chromium 브라우저 제어 도구 11개</b></summary>
 
 | 도구 | 기능 | 주요 입력·참고 |
 |---|---|---|
@@ -57,10 +57,13 @@
 | `browser_elements` | 페이지의 링크와 입력창·버튼 요소 정보를 수집 | `target_id`(선택), `max_items`(최대 100) |
 | `browser_click` | CSS 선택자로 찾은 페이지 요소를 클릭 | `selector`, `target_id`(선택) |
 | `browser_fill` | CSS 선택자로 입력창에 값을 지정하고 `input`/`change` 이벤트 발생 | `selector`, `value`, `target_id`(선택) |
-| `browser_screenshot` | 브라우저 화면을 PNG로 캡처하고 MCP 클라이언트에 이미지(`image/png`)를 직접 반환하며, 서버에도 비공개 PNG로 저장 | `target_id`(선택); 이미지 콘텐츠와 저장 경로·바이트 수 동시 반환 |
+| `browser_keypress` | Enter·Tab·Esc·방향키 등 지정된 키를 활성 페이지에 전송 | `key`, `target_id`(선택) |
+| `browser_scroll` | 현재 페이지나 선택한 스크롤 컨테이너를 상하좌우로 이동 | `direction`, `pixels`(1~1500), `selector`·`target_id`(선택) |
+| `browser_wait_for` | 로딩 완료·CSS 요소·텍스트 등장 대기(접근 제한 시 중지) | `selector` 또는 `text`(선택), `timeout_seconds`(1~20), `target_id`(선택) |
+| `browser_screenshot` | 브라우저 화면을 PNG로 캡처하고 MCP 클라이언트에 이미지(`image/png`)를 직접 반환하며, 서버에 파일 저장 없이 반환 | `target_id`(선택); 이미지 콘텐츠와 바이트 수 반환 |
 
 - **탭 지정:** 기본 탭 대신 특정 화면을 다루려면 `browser_tabs`로 `target_id`를 확인한 뒤 전달합니다.
-- **화면 캡처:** `browser_screenshot`은 MCP의 **텍스트 메타데이터 + `image/png` 이미지 콘텐츠**를 반환하고, 서버에도 접근 권한 `0600`의 PNG를 저장합니다. 클라이언트가 이미지 콘텐츠 표시를 지원해야 실제 채팅에서 이미지가 보입니다. 8 MiB를 초과하거나 PNG가 아닌 응답은 거부합니다.
+- **화면 캡처:** `browser_screenshot`은 MCP의 **텍스트 메타데이터 + `image/png` 이미지 콘텐츠**를 반환하고, 서버 파일 저장 없이 MCP Apps 이미지 뷰어로 전달합니다. 클라이언트가 이미지 콘텐츠 표시를 지원해야 실제 채팅에서 이미지가 보입니다. 8 MiB를 초과하거나 PNG가 아닌 응답은 거부합니다.
 
 </details>
 
@@ -99,4 +102,4 @@ sudo bash /opt/mcp-deployment/status.sh
 sudo python3 /opt/mcp-deployment/scripts/check_calls.py
 ```
 
-스크린샷은 HackBrowser의 `browser_screenshot`이 서버에 `0600` 권한의 PNG 사본을 남기고 MCP `image/png` 블록을 반환합니다. 클라이언트가 이미지 콘텐츠 렌더링을 지원하지 않으면 채팅에서 그림이 보이지 않을 수 있습니다. ZAP 능동 스캔은 허가된 대상에서만 수행하세요.
+스크린샷은 HackBrowser의 `browser_screenshot`이 서버에 PNG를 저장하지 않고 MCP `image/png` 블록을 반환합니다. 클라이언트가 이미지 콘텐츠 렌더링을 지원하지 않으면 채팅에서 그림이 보이지 않을 수 있습니다. ZAP 능동 스캔은 허가된 대상에서만 수행하세요.
