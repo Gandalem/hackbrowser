@@ -27,6 +27,7 @@
       padding: 9px; border: 1px solid #8889; border-radius: 6px; font: inherit; }
     #verification-positions { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
     #verification-submit { margin-top: 8px; font-weight: 650; }
+    #resume-agent { font-weight: 650; }
     .verification-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .verification-active { cursor: crosshair; }
     [hidden] { display: none !important; }
@@ -42,7 +43,7 @@
     </div>
     <section id="verification-card" hidden aria-label="사용자 인증 입력">
       <h2>사용자 인증이 필요합니다</h2>
-      <p>이미지의 CAPTCHA를 직접 읽고 아래에 답을 입력하세요. 화면에서 <strong>답 입력칸</strong>과
+      <p>이미지 선택형 CAPTCHA는 <strong>이미지 직접 클릭</strong>을 사용하세요. 텍스트형 CAPTCHA는 아래에 답을 입력하고 화면에서 <strong>답 입력칸</strong>과
         <strong>확인 버튼</strong> 위치를 순서대로 클릭해 지정한 후 제출할 수 있습니다.</p>
       <label for="verification-answer">인증 답변</label>
       <input id="verification-answer" type="text" maxlength="64" autocomplete="off"
@@ -171,7 +172,7 @@
         }
         return;
       }
-      lastVerificationTarget = value.target_id || lastVerificationTarget;
+      lastVerificationTarget = metadata.target_id || lastVerificationTarget;
       activeVerification = value;
       resumeAgent.hidden = true;
       verificationAnswer.value = "";
