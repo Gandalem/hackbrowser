@@ -15,7 +15,7 @@ class SourceTests(unittest.TestCase):
             ast.parse(f.read_text(), filename=str(f))
 
     def test_shell_syntax(self):
-        for f in ["install.sh", "uninstall.sh", "status.sh", "renew-share.sh", "scripts/deploy_release.sh", "scripts/ensure_korean_fonts.sh"]:
+        for f in ["install.sh", "uninstall.sh", "status.sh", "renew-share.sh", "scripts/deploy_release.sh", "scripts/ensure_korean_fonts.sh", "scripts/configure_gui_chromium.sh", "services/hackbrowser/start_chromium_gui.sh"]:
             subprocess.run(["bash", "-n", str(ROOT / f)], check=True)
 
     def test_no_runtime_credentials_bundled(self):
@@ -33,7 +33,7 @@ class SourceTests(unittest.TestCase):
         self.assertIn('bash "$ROOT/scripts/ensure_korean_fonts.sh"', deployer)
         self.assertLess(
             deployer.index('bash "$ROOT/scripts/ensure_korean_fonts.sh"'),
-            deployer.index("systemctl restart mcpstack-chromium.service"),
+            deployer.index('bash "$ROOT/scripts/configure_gui_chromium.sh"'),
         )
         self.assertIn("fonts-noto-cjk", helper)
         self.assertIn("fonts-nanum", helper)
@@ -64,7 +64,7 @@ class SourceTests(unittest.TestCase):
         self.assertIn('from mcp.server.apps import Apps', deployer)
         self.assertIn("runpy.run_path(", deployer)
         self.assertLess(deployer.index("runpy.run_path("),
-                        deployer.index("systemctl restart mcpstack-chromium.service"))
+                        deployer.index('bash "$ROOT/scripts/configure_gui_chromium.sh"'))
 
     def test_hackbrowser_tools(self):
         tree = ast.parse((ROOT / "services/hackbrowser/server.py").read_text())
