@@ -139,6 +139,10 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 서버에 직접 확인할 때는 `sudo bash /opt/mcp-deployment/scripts/ensure_korean_fonts.sh --check`를 실행합니다. `[PASS] GUI Chromium Korean fonts available`이면 운영 계정에서 한국어 폰트를 찾을 수 있다는 의미입니다. 이후 한국어가 포함된 웹페이지를 다시 캡처해 실제 렌더링을 확인하세요. 폰트가 잡혀도 웹사이트 자체의 CSS·문자 인코딩 문제는 별도로 점검해야 합니다.
 
+## 빠른 화면 조작과 중복 텍스트 해결
+
+`browser_click_text`의 `container_selector`는 선택적 CSS 범위로, 같은 이름의 링크/버튼이 반복되는 화면에서도 원하는 영역을 명시하도록 돕습니다. 범위에 일치하는 컨테이너가 정확히 하나가 아니거나 해당 영역에 같은 이름이 여러 개라면 임의의 항목을 선택하지 않고 오류를 반환합니다. `browser_elements`로 CSS 위치를 확인한 뒤 범위를 지정하세요. 스크롤 및 Enter 외 방향키는 기존 접근 제한을 존중하면서 페이지 이동용 4초 대기를 사용하지 않습니다.
+
 ## Playwright GUI 조작 엔진
 
 좌표 클릭 도구는 Playwright Python `mouse.click(x, y)`를 사용하며, 뷰포트 바깥 좌표는 거부합니다. 텍스트가 여러 요소에 중복 매칭되면 첫 요소를 임의로 클릭하지 않고 `ok:false`와 일치 개수를 반환합니다. 텍스트 클릭 실패 시 `browser_elements`에서 특정 CSS 선택자를 확인하세요.

@@ -62,17 +62,30 @@ def _body_sample(page) -> str:
         return ""
 
 
-def _choose_text_locator(page, text: str, role: str, exact: bool):
+def _choose_text_locator(page, text: str, role: str, exact: bool,
+                         container_selector: str | None = None):
+    """Resolve an accessible name in a specific container, without guessing."""
+    scope = page
+    if container_selector is not None:
+        scope = page.locator(container_selector)
+        matches = scope.count()
+        if matches != 1:
+            raise ValueError(
+                f"Container selector matched {matches} regions; specify exactly one"
+            )
     if role == "text":
-        locator = page.get_by_text(text, exact=exact)
+        locator = scope.get_by_text(text, exact=exact)
     else:
-        locator = page.get_by_role(role, name=text, exact=exact)
+        locator = scope.get_by_role(role, name=text, exact=exact)
         if locator.count() == 0 and role in {"button", "link", "tab"}:
-            locator = page.get_by_text(text, exact=exact)
+            locator = scope.get_by_text(text, exact=exact)
     matches = locator.count()
+    if matches == 0:
+        raise ValueError("No matching visible element; inspect browser_elements")
     if matches > 1:
         raise ValueError(
-            f"Multiple elements match ({matches}); use a more specific label or CSS selector"
+            f"Multiple elements match ({matches}); specify container_selector "
+            "or a more specific CSS selector"
         )
     return locator.first
 
@@ -95,7 +108,8 @@ def _run_connected(browser, selected: dict, action: str, args: dict,
             page.locator(args["selector"]).first.click(timeout=ACTION_TIMEOUT_MS)
         elif action == "click_text":
             locator = _choose_text_locator(
-                page, args["text"], args["role"], args["exact"]
+                page, args["text"], args["role"], args["exact"],
+                args.get("container_selector"),
             )
             locator.click(timeout=ACTION_TIMEOUT_MS)
         elif action == "fill":

@@ -231,6 +231,17 @@ def _record_restriction(url: str) -> int:
     return ACCESS_COOLDOWN_SECONDS
 
 
+def _check_access_only(host: str) -> None:
+    """Check a previously detected site denial without reserving a navigation slot."""
+    with _access_lock:
+        remaining = _restricted_until.get(_site_key(host), 0.0) - time.monotonic()
+    if remaining > 0:
+        raise RuntimeError(
+            f"{host}: 접속 제한이 확인되어 조작을 중단했습니다 "
+            f"(남은 대기 {int(remaining) + 1}초)."
+        )
+
+
 def _pace_navigation(host: str) -> None:
     """Reserve a non-burst navigation slot; never retry a denied origin."""
     key = _site_key(host)
@@ -401,20 +412,29 @@ def browser_fill(selector: str, value: str, target_id: str | None = None) -> dic
 
 @mcp.tool()
 def browser_click_text(text: str, role: str = "button", exact: bool = True,
-                       target_id: str | None = None) -> dict:
-    """Click one element by accessible text/role; rejects ambiguous matches."""
+                       target_id: str | None = None,
+                       container_selector: str | None = None) -> dict:
+    """Click an accessible label within an optional scoped container.
+
+    When multiple elements match, report ambiguity rather than guessing.
+    """
     if not isinstance(text, str) or not 1 <= len(text) <= 150:
         raise ValueError("text must contain 1-150 characters")
     if role not in {"button", "link", "tab", "text"}:
         raise ValueError("role must be button, link, tab, or text")
     if not isinstance(exact, bool):
         raise ValueError("exact must be a boolean")
+    if container_selector is not None and (
+            not isinstance(container_selector, str)
+            or not 1 <= len(container_selector) <= 512):
+        raise ValueError("container_selector must contain 1-512 characters")
     selected = _target(target_id)
     host = urlsplit(selected.get("url", "")).hostname
     if host:
         _pace_navigation(host.lower())
     return _gui_action(selected, "click_text", {
         "text": text, "role": role, "exact": exact,
+        "container_selector": container_selector,
     })
 
 
@@ -478,7 +498,10 @@ def browser_keypress(key: str, target_id: str | None = None) -> dict:
     target = _target(target_id)
     host = urlsplit(target.get("url", "")).hostname
     if host:
-        _pace_navigation(host.lower())
+        if key == "Enter":
+            _pace_navigation(host.lower())
+        else:
+            _check_access_only(host.lower())
     code, virtual_key, text = _KEY_EVENTS[key]
     down = {"type": "keyDown", "key": key if key != "Space" else " ",
             "code": code, "windowsVirtualKeyCode": virtual_key}
@@ -504,7 +527,7 @@ def browser_scroll(direction: str = "down", pixels: int = 600,
     target = _target(target_id)
     host = urlsplit(target.get("url", "")).hostname
     if host:
-        _pace_navigation(host.lower())
+        _check_access_only(host.lower())
     axis = "top" if direction in {"up", "down"} else "left"
     amount = pixels if direction in {"down", "right"} else -pixels
     expression = """(function(){

@@ -41,6 +41,12 @@ class FakeLocator:
     def first(self):
         return self
 
+    def get_by_role(self, role, name, exact):
+        return self
+
+    def get_by_text(self, text, exact):
+        return self
+
     def click(self, timeout):
         self.clicks += 1
 
@@ -155,6 +161,26 @@ class GuiActionTests(unittest.TestCase):
         self.assertTrue(press["ok"])
         self.assertEqual(page.element.presses, ["Enter"])
 
+    def test_semantic_click_scoped_to_one_container(self):
+        result, page, _ = self._run("click_text", {
+            "text": "건프라", "role": "link", "exact": True,
+            "container_selector": "#product-list",
+        })
+        self.assertTrue(result["ok"])
+        self.assertEqual(page.element.clicks, 1)
+
+    def test_semantic_click_rejects_ambiguous_container(self):
+        page = FakePage()
+        region = FakeLocator()
+        region.count = lambda: 2
+        page.locator = lambda selector: region
+        result, _, _ = self._run("click_text", {
+            "text": "건프라", "role": "link", "exact": True,
+            "container_selector": ".multiple",
+        }, page=page)
+        self.assertFalse(result["ok"])
+        self.assertIn("2 regions", result["error"])
+
     def test_gui_coordinate_click_uses_supported_mouse_api(self):
         page = FakePage()
         clicks = []
@@ -231,6 +257,8 @@ class GuiActionTests(unittest.TestCase):
             server.browser_fill_and_submit("#search", "query", key="Escape")
         with self.assertRaises(ValueError):
             server.browser_click_at(-1.0, 10)
+        with self.assertRaises(ValueError):
+            server.browser_click_text("test", container_selector="")
 
 
 if __name__ == "__main__":

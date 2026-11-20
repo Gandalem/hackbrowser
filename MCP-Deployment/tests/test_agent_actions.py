@@ -35,6 +35,13 @@ class AgentActionsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.browser_keypress("Control+L")
 
+    def test_scroll_does_not_reserve_navigation_slot(self):
+        with mock.patch.object(server, "_target", return_value=TARGET), \
+             mock.patch.object(server, "_pace_navigation") as pace, \
+             mock.patch.object(server, "_evaluate", return_value={"ok": True}):
+            server.browser_scroll("down", 100)
+        pace.assert_not_called()
+
     def test_scroll_restricts_direction_and_bounds(self):
         with mock.patch.object(server, "_target", return_value=TARGET), \
              mock.patch.object(server, "_pace_navigation"), \
