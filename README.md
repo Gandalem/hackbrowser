@@ -66,7 +66,7 @@ Use the [full installation and authentication guide](MCP-Deployment/README.md) f
 ## Verified behavior and current limitations
 
 - Tested on an OCI GUI Chromium deployment: page navigation, clickable elements, new tabs, scrolling, screenshot and bounded workflow resume.
-- CI checks Python syntax, unit tests and MCP tool discovery. **Docker standalone has not yet been exercised on every supported CPU/OS combination.**
+- CI checks Python syntax, unit tests and MCP tool discovery. **ARM64 standalone Docker built and started successfully in GitHub Actions; other architectures/hosts still require verification.**
 - Semantic Observe/Act is new in this beta: it deliberately blocks unknown button actions, unsafe destinations and sensitive form input. Re-observe if a reference expires.
 - CAPTCHA/manual login is performed by a person. An end-to-end real CAPTCHA → workflow resume demonstration remains to be validated.
 - The full server currently **shares one GUI profile across authenticated MCP users**. Do not use it for multiple untrusted users.
