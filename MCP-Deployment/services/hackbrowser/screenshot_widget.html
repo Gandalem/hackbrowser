@@ -28,7 +28,6 @@
     <img id="preview" class="preview" alt="HackBrowser가 캡처한 실제 브라우저 화면" />
     <div class="toolbar">
       <button id="download" type="button" disabled>PNG 다운로드</button>
-      <button id="upload" type="button" hidden>ChatGPT 파일로 저장</button>
       <span id="details"></span>
     </div>
   </main>
@@ -37,11 +36,9 @@
     // The screenshot comes from the MCP tool result, not a public URL.
     // No cookies, bearer URLs or image bytes are sent to other servers.
     let imageBase64 = null;
-    let sizeBytes = 0;
     const preview = document.getElementById("preview");
     const status = document.getElementById("status");
     const download = document.getElementById("download");
-    const upload = document.getElementById("upload");
     const details = document.getElementById("details");
     let hostInitialized = false;
     let lastReportedHeight = 0;
@@ -108,13 +105,12 @@
       const textBlock = blocks.find((item) => item?.type === "text");
       let metadata = {};
       try { metadata = JSON.parse(textBlock?.text ?? "{}"); } catch (_) {}
-      sizeBytes = Number.isFinite(metadata.bytes) ? metadata.bytes : Math.floor(block.data.length * .75);
-      details.textContent = (sizeBytes / 1024).toFixed(1) + " KiB";
+      const bytes = Number.isFinite(metadata.bytes) ? metadata.bytes : Math.floor(block.data.length * .75);
+      details.textContent = (bytes / 1024).toFixed(1) + " KiB";
       preview.src = "data:image/png;base64," + imageBase64;
       preview.style.display = "block";
       status.textContent = "HackBrowser 스크린샷";
       download.disabled = false;
-      upload.hidden = typeof window.openai?.uploadFile !== "function";
       scheduleHeightReport();
     }
 
@@ -144,27 +140,6 @@
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       } catch (_) {
         status.textContent = "PNG 저장을 완료하지 못했습니다.";
-      }
-    });
-
-    upload.addEventListener("click", async () => {
-      if (typeof window.openai?.uploadFile !== "function") return;
-      upload.disabled = true;
-      status.textContent = "ChatGPT 파일로 업로드 중입니다.";
-      try {
-        const result = await window.openai.uploadFile(pngFile());
-        const fileId = result?.fileId;
-        if (!fileId || typeof fileId !== "string") throw new Error("fileId unavailable");
-        if (typeof window.openai.setWidgetState === "function") {
-          window.openai.setWidgetState({
-            modelContent: "HackBrowser screenshot image saved to ChatGPT.",
-            imageIds: [fileId],
-          });
-        }
-        status.textContent = "ChatGPT 파일로 저장했습니다. 해당 채팅의 일반 첨부파일 생성과는 별개입니다.";
-      } catch (_) {
-        status.textContent = "현재 ChatGPT 환경에서는 파일 업로드를 지원하지 않습니다.";
-        upload.disabled = false;
       }
     });
 
