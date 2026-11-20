@@ -5,7 +5,6 @@ Idempotent; reads credentials from the root-owned runtime/private.env file.
 """
 import json
 import os
-import sys
 import shlex
 import time
 import urllib.error
