@@ -62,6 +62,8 @@ rollback() {
 }
 trap rollback ERR
 cp -a "$SOURCE/services/." "$ROOT/services/"
+# Remove the legacy public PNG download handler left by earlier releases.
+rm -f -- "$ROOT/services/gateway/screenshot_download.py"
 cp -a "$SOURCE/scripts/." "$ROOT/scripts/"
 cp -a "$SOURCE/templates/." "$ROOT/templates/"
 cp -a "$SOURCE/docs/." "$ROOT/docs/"
