@@ -1,0 +1,96 @@
+name: One-time v2 beta semantic GUI smoke
+on:
+  push:
+    branches: [master]
+    paths: [".github/workflows/one-time-beta-observe-smoke.yml"]
+permissions:
+  contents: read
+jobs:
+  verify-semantic-gui:
+    if: github.repository == 'Gandalem/hackbrowser'
+    runs-on: ubuntu-24.04
+    environment: oci-production
+    concurrency:
+      group: oci-mcp-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Test Observe and Act on disposable GUI tab
+        env:
+          DEPLOY_HOST: ${{ secrets.OCI_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.OCI_SSH_USER }}
+          DEPLOY_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST_KEYS: ${{ secrets.OCI_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_KEY" && test -n "$DEPLOY_HOST_KEYS"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > "$HOME/.ssh/id_ci_deploy"
+          printf '%s\n' "$DEPLOY_HOST_KEYS" | tr -d '\r' > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ci_deploy" "$HOME/.ssh/known_hosts"
+          trap 'rm -f "$HOME/.ssh/id_ci_deploy"' EXIT
+          ssh -i "$HOME/.ssh/id_ci_deploy" -o BatchMode=yes \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          sudo -n -u mcpstack /opt/mcp-deployment/runtime/venv-hackbrowser/bin/python - <<'PY'
+          import json
+          import sys
+          import time
+          sys.path.insert(0, "/opt/mcp-deployment/services/hackbrowser")
+          import server
+          before = {t["target_id"] for t in server.browser_tabs()}
+          created = server._browser_cdp(
+              "Target.createTarget", {"url": "about:blank#semantic-smoke"}
+          )
+          target_id = created["targetId"]
+          try:
+              html = (
+                  '<form method="get" action="https://example.org/search">'
+                  '<input type="search" name="q" aria-label="Search query">'
+                  '</form>'
+                  '<button type="button" onclick="document.getElementById(\'status\').innerText=\'Expanded\'">'
+                  'More</button><div id="status">Collapsed</div>'
+              )
+              for attempt in range(20):
+                  try:
+                      server._evaluate("document.body.innerHTML = " + json.dumps(html),
+                                       target_id)
+                      break
+                  except Exception:
+                      if attempt == 19:
+                          raise
+                      time.sleep(0.2)
+              obs = server.browser_observe(target_id=target_id, max_elements=10)
+              assert isinstance(obs.get("snapshot_id"), str), obs
+              controls = obs["elements"]
+              search = next(x for x in controls if x["name"] == "Search query")
+              filled = server.browser_act(
+                  obs["snapshot_id"], search["ref"], "fill",
+                  text="gundam", target_id=target_id
+              )
+              assert filled.get("ok"), filled
+              assert "gundam" not in str(filled), "Input leaked in tool output"
+              obs2 = server.browser_observe(target_id=target_id, max_elements=10)
+              button = next(x for x in obs2["elements"] if x["name"] == "More")
+              click = server.browser_act(
+                  obs2["snapshot_id"], button["ref"], "click",
+                  target_id=target_id
+              )
+              assert click.get("ok"), click
+              after = server.browser_page_text(target_id=target_id, max_chars=600)
+              assert "Expanded" in after["text"], after
+              repeated = server.browser_act(
+                  obs2["snapshot_id"], button["ref"], "click",
+                  target_id=target_id
+              )
+              assert not repeated.get("ok"), repeated
+              print("PASS: real GUI Observe -> safe Fill -> Observe -> Act -> DOM verified")
+              print("PASS: consumed element reference cannot be reused")
+          finally:
+              server._browser_cdp("Target.closeTarget", {"targetId": target_id})
+          remaining = {t["target_id"] for t in server.browser_tabs()}
+          assert remaining == before, "Temporary tab cleanup changed user's tabs"
+          print("PASS: original browser tabs unchanged")
+          PY
+          REMOTE
