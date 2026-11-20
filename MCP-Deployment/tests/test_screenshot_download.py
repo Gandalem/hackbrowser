@@ -1,5 +1,4 @@
 """Security regression tests for expiring screenshot capability URLs."""
-import asyncio
 import importlib.util
 import os
 from pathlib import Path
