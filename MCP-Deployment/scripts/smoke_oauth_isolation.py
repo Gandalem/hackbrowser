@@ -182,7 +182,7 @@ def main():
     account = pwd.getpwnam(caller)
     env = read_private_env()
     public = env["PUBLIC_BASE_URL"].rstrip("/")
-    keycloak = f"http://127.0.0.1:8081/auth"
+    keycloak = "http://127.0.0.1:8081/auth"
     resource = f"{public}/hackbrowser/mcp"
     prefix = "hb-smoke-" + secrets.token_hex(6)
     client_id = prefix
