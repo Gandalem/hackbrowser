@@ -171,8 +171,12 @@ def _record_restriction(url: str) -> int:
         return 0
     key = _site_key(host)
     with _access_lock:
-        end = time.monotonic() + ACCESS_COOLDOWN_SECONDS
-        _restricted_until[key] = max(end, _restricted_until.get(key, 0.0))
+        now = time.monotonic()
+        previous = _restricted_until.get(key, 0.0)
+        if previous > now:
+            # Reading the same blocked page should not reset the cooldown.
+            return int(previous - now) + 1
+        _restricted_until[key] = now + ACCESS_COOLDOWN_SECONDS
     return ACCESS_COOLDOWN_SECONDS
 
 
@@ -285,12 +289,16 @@ def browser_click(selector: str, target_id: str | None = None) -> dict:
     """Click one CSS-selector-matched element in the current page."""
     if not selector or len(selector) > 512:
         raise ValueError("selector must contain 1-512 characters")
+    selected = _target(target_id)
+    current_host = urlsplit(selected.get("url", "")).hostname
+    if current_host:
+        _pace_navigation(current_host.lower())
     expression = """(function(){
       var el=document.querySelector(%s);
       if(!el)return {ok:false,error:'No element matches selector'};
       el.click(); return {ok:true};
     })()""" % json.dumps(selector)
-    value = _evaluate(expression, target_id)
+    value = _evaluate(expression, selected["id"])
     return value if isinstance(value, dict) else {"result": value}
 
 
