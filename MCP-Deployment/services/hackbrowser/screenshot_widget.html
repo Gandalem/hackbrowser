@@ -6,12 +6,14 @@
   <title>HackBrowser Screenshot</title>
   <style>
     :root { color-scheme: light dark; font: 14px/1.45 system-ui, -apple-system, sans-serif; }
-    body { margin: 0; padding: 12px; }
-    .viewer { width: 100%; box-sizing: border-box; }
-    .preview { max-width: 100%; width: 100%; height: auto; max-height: 72vh;
-      object-fit: contain; border: 1px solid #8885; border-radius: 8px;
-      display: none; background: #fff; }
-    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }
+    html, body { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; overflow-x: hidden; }
+    body { margin: 0; padding: 10px; }
+    .viewer { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+    .preview { box-sizing: border-box; width: 100%; max-width: 100%; height: auto;
+      max-height: var(--preview-max-height, 440px); object-fit: contain;
+      border: 1px solid #8885; border-radius: 8px; display: none; background: #fff; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }
+    @media (max-width: 480px) { body { padding: 6px; } .toolbar { gap: 6px; } }
     button { cursor: pointer; padding: 7px 12px; border: 1px solid #8887;
       border-radius: 6px; background: transparent; color: inherit; }
     button:disabled { cursor: not-allowed; opacity: .45; }
@@ -23,7 +25,7 @@
 <body>
   <main class="viewer">
     <p id="status" role="status" aria-live="polite">캡처 이미지를 불러오는 중입니다.</p>
-    <img id="preview" alt="HackBrowser가 캡처한 실제 브라우저 화면" />
+    <img id="preview" class="preview" alt="HackBrowser가 캡처한 실제 브라우저 화면" />
     <div class="toolbar">
       <button id="download" type="button" disabled>PNG 다운로드</button>
       <button id="upload" type="button" hidden>ChatGPT 파일로 저장</button>
@@ -41,6 +43,47 @@
     const download = document.getElementById("download");
     const upload = document.getElementById("upload");
     const details = document.getElementById("details");
+    let hostInitialized = false;
+    let lastReportedHeight = 0;
+    let resizeQueued = false;
+
+    // MCP Apps hosts can resize an inline iframe using this standard notification.
+    // Report only content height: reporting viewport width can widen the iframe
+    // and create the horizontal scrolling we are trying to remove.
+    function reportHeight() {
+      if (!hostInitialized) return;
+      const height = Math.ceil(document.body.scrollHeight);
+      if (height <= 0 || Math.abs(height - lastReportedHeight) < 2) return;
+      lastReportedHeight = height;
+      window.parent.postMessage({
+        jsonrpc: "2.0",
+        method: "ui/notifications/size-changed",
+        params: { height },
+      }, "*");
+    }
+
+    function scheduleHeightReport() {
+      if (resizeQueued) return;
+      resizeQueued = true;
+      requestAnimationFrame(() => {
+        resizeQueued = false;
+        reportHeight();
+      });
+    }
+
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(scheduleHeightReport).observe(document.body);
+    }
+    window.addEventListener("resize", scheduleHeightReport);
+
+    function applyHostHeightLimit(containerDimensions) {
+      if (!containerDimensions) return;
+      const availableHeight = containerDimensions.height ?? containerDimensions.maxHeight;
+      if (typeof availableHeight !== "number" || !Number.isFinite(availableHeight)) return;
+      // Keep enough space for title, toolbar and breathing room on fixed-height hosts.
+      const previewHeight = Math.max(120, Math.min(440, availableHeight - 110));
+      document.documentElement.style.setProperty("--preview-max-height", previewHeight + "px");
+    }
 
     function captureContent(payload) {
       const value = payload?.mcp_tool_result ?? payload?.call_tool_result ?? payload?.result ?? payload;
@@ -72,11 +115,14 @@
       status.textContent = "HackBrowser 스크린샷";
       download.disabled = false;
       upload.hidden = typeof window.openai?.uploadFile !== "function";
+      scheduleHeightReport();
     }
 
+    preview.addEventListener("load", scheduleHeightReport);
     preview.addEventListener("error", () => {
       status.textContent = "이 호스트가 인라인 PNG 표시를 제한했습니다. 다운로드 기능을 이용하세요.";
       preview.style.display = "none";
+      scheduleHeightReport();
     });
 
     function pngFile() {
@@ -127,10 +173,17 @@
       if (event.source !== window.parent || event.data?.jsonrpc !== "2.0") return;
       const message = event.data;
       if (message.id === 1 && message.result?.protocolVersion) {
+        applyHostHeightLimit(message.result.hostContext?.containerDimensions);
+        hostInitialized = true;
         window.parent.postMessage({ jsonrpc: "2.0", method: "ui/notifications/initialized" }, "*");
+        scheduleHeightReport();
         return;
       }
       if (message.method === "ui/notifications/tool-result") renderScreenshot(message.params);
+      if (message.method === "ui/notifications/host-context-changed") {
+        applyHostHeightLimit(message.params?.containerDimensions);
+        scheduleHeightReport();
+      }
     });
 
     window.parent.postMessage({

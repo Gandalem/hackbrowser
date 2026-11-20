@@ -135,6 +135,8 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 `browser_screenshot`에 MCP Apps UI 메타데이터(`ui.resourceUri` 및 `openai/outputTemplate`)와 자체 HTML 이미지 뷰어(`ui://hackbrowser/screenshot.html`)를 추가했습니다. UI 호스트가 MCP Apps 리소스를 표시한다면 **외부의 만료되는 `/captures/*` URL 대신 MCP `ImageContent`의 PNG 바이트**로 화면을 표시하고, 이미지 뷰어 내에서 PNG를 저장할 수 있습니다. 기존 PNG 데이터 블록과 다운로드 링크는 그대로 유지됩니다.
 
+**이미지 표시:** 뷰어는 캡처 원본을 채팅 너비에 맞춰 축소하고, 높이를 최대 440px로 제한하며, 호스트에 콘텐츠 높이 변경을 통지합니다. 캡처 원본 전체는 PNG 다운로드 버튼으로 저장할 수 있습니다. **채팅 답변에 별도의 외부 `/captures/*` 이미지를 다시 삽입하지 마세요.** 해당 링크는 10분 후 만료되어 아래쪽에 깨진 이미지가 중복 표시됩니다.
+
 **주의:** 일반 ChatGPT MCP 커넥터가 이 UI 메타데이터를 지원하는지는 호스트 버전·설정에 따라 달라질 수 있습니다. UI가 나타나지 않으면 기존 이미지 데이터와 다운로드 링크만 사용 가능합니다. 뷰어에서 사용 가능한 `uploadFile` 기능이 있더라도 이는 ChatGPT 파일 저장 기능으로, 일반 채팅 메시지에 자동 첨부됨을 보장하지 않습니다. 재연결 후 실제 ChatGPT 화면에서 검증해야 합니다.
 
 ## 스크린샷 한글 폰트 깨짐(□) 해결
