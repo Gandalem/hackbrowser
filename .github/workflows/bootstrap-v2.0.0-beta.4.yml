@@ -1,0 +1,29 @@
+name: One-time HackBrowser beta.4 usability fix release
+on:
+  push:
+    branches: [master]
+    paths: [".github/workflows/bootstrap-v2.0.0-beta.4.yml"]
+permissions:
+  actions: write
+  contents: write
+jobs:
+  dispatch:
+    if: github.repository == 'Gandalem/hackbrowser'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag beta.4 and deploy to OCI using the release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor b6f9a94be0aac408120d696d0e622898c8fb4e6e HEAD
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v2.0.0-beta.4" >/dev/null 2>&1; then
+            echo 'Tag already exists; not replacing it' >&2
+            exit 1
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref='refs/tags/v2.0.0-beta.4' -f sha="$GITHUB_SHA" >/dev/null
+          gh workflow run mcp-release.yml --ref v2.0.0-beta.4
