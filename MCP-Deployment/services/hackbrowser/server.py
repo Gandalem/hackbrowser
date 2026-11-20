@@ -10,6 +10,7 @@ import binascii
 import json
 import os
 import secrets
+import sys
 import threading
 import time
 from pathlib import Path
@@ -272,6 +273,8 @@ def _pace_navigation(host: str) -> None:
 
 # A bounded navigation-only workflow may pause for manual user authentication.
 # This manager holds no passwords, CAPTCHA answers or persistent browser profile.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 from workflow_engine import WorkflowManager, safe_public_url
 
 
