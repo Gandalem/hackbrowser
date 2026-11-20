@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Generate cloud-neutral Caddy configuration from a small set of settings."""
 import os
-import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
