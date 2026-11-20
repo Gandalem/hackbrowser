@@ -238,6 +238,10 @@ else
   fi
 fi
 
+# Install system fonts before the headless browser is started. This also
+# verifies that the unprivileged mcpstack account can resolve Hangul glyphs.
+bash "$ROOT/scripts/ensure_korean_fonts.sh"
+
 # Three separate venvs minimize dependency conflicts.
 python3 -m venv "$ROOT/runtime/venv-pocmap"
 "$ROOT/runtime/venv-pocmap/bin/python" -m pip install --disable-pip-version-check 'pocmap[server]==2.9.1'
