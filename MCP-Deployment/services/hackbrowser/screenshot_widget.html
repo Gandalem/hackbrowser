@@ -191,6 +191,13 @@
         ? metadata.paused_workflow.workflow_id : null;
       lastVerificationTarget = metadata?.target_id || lastVerificationTarget;
       handoffRemoteActive = metadata?.handoff?.active === true;
+      // Expired leases must not trap this card in unusable manual mode.
+      if (handoffToken && (!handoffRemoteActive ||
+          metadata?.handoff?.target_id !== handoffTarget)) {
+        handoffToken = null;
+        handoffTarget = null;
+        handoffState.textContent = "수동 제어 시간이 만료되어 AI 제어로 복귀했습니다.";
+      }
       updateManualControls();
       if (!value?.required || typeof value.id !== "string" ||
           !Number.isInteger(value.viewport?.width) ||
