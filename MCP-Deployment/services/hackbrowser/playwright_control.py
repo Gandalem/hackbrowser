@@ -119,9 +119,14 @@ def run_action(cdp_root: str, selected: dict, action: str, args: dict,
                 x, y = args["x"], args["y"]
                 if not (0 <= x < viewport["width"] and 0 <= y < viewport["height"]):
                     raise ValueError("Click position is outside the GUI viewport")
-                page.mouse.click(x, y, timeout=ACTION_TIMEOUT_MS)
+                page.mouse.click(x, y)
             else:
                 raise ValueError("Unsupported browser operation")
+        except ValueError as exc:
+            # Ambiguous visible labels are expected on real sites. Report the
+            # reason instead of surfacing an opaque MCP execution exception.
+            return {"ok": False, "action": action, "target_id": selected["id"],
+                    "error": str(exc)}
         except (PWTimeout, PlaywrightError) as exc:
             # Never repeat a click if the outcome is ambiguous.
             return {"ok": False, "action": action, "target_id": selected["id"],
