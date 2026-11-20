@@ -10,6 +10,8 @@ deleted on exit, including assertion failures.
 from __future__ import annotations
 
 import json
+import hashlib
+import threading
 import os
 import pwd
 import secrets
@@ -22,6 +24,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import ProxyHandler, Request, build_opener
@@ -40,6 +43,30 @@ META = {
     "io.modelcontextprotocol/clientCapabilities": {},
     "io.modelcontextprotocol/clientInfo": {"name": "oci-oauth-isolation-test", "version": "1.0"},
 }
+
+
+class MarkerSite(BaseHTTPRequestHandler):
+    def do_GET(self):
+        marker = {"/alice": "ALICE", "/bob": "BOB"}.get(self.path)
+        if marker is None:
+            self.send_error(404)
+            return
+        body = (
+            "<!doctype html><html><head><title>SMOKE-" + marker
+            + "</title></head><body><h1>SMOKE-" + marker
+            + "</h1><div id='ck'></div>"
+            + "<script>document.getElementById('ck').textContent=document.cookie</script>"
+            + "</body></html>"
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Set-Cookie", "testowner=" + marker + "; Path=/; SameSite=Lax")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args):
+        pass
 
 
 def request(url, method="GET", data=None, token=None, form=False, timeout=25):
@@ -161,6 +188,8 @@ def main():
     client_uuid = None
     stage_process = None
     stage_root = None
+    site = None
+    site_thread = None
 
     if not (SOURCE / "services/hackbrowser/server.py").is_file():
         raise RuntimeError("Run from the HackBrowser PR branch checkout")
@@ -341,6 +370,11 @@ def main():
         print("[RESULT] OAuth two-user isolation staging smoke PASSED", flush=True)
 
     finally:
+        if site is not None:
+            site.shutdown()
+            site.server_close()
+            if site_thread:
+                site_thread.join(timeout=3)
         if stage_process is not None:
             if stage_process.poll() is None:
                 os.killpg(stage_process.pid, signal.SIGTERM)
