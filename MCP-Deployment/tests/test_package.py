@@ -45,6 +45,22 @@ class SourceTests(unittest.TestCase):
         self.assertIn("runuser -u mcpstack --", helper)
         self.assertIn("apt-get install -y --no-install-recommends", helper)
 
+    def test_release_reconfigures_and_reloads_caddy(self):
+        script = (ROOT / "scripts/deploy_release.sh").read_text()
+        self.assertIn('source "$ROOT/runtime/private.env"', script)
+        self.assertIn('python3 "$ROOT/scripts/render_config.py"', script)
+        self.assertIn('caddy caddy validate --config /etc/caddy/Caddyfile', script)
+        self.assertIn('caddy caddy reload --config /etc/caddy/Caddyfile', script)
+        self.assertIn('"$BACKUP/runtime/caddy/Caddyfile"', script)
+        self.assertLess(
+            script.index('python3 "$ROOT/scripts/render_config.py"'),
+            script.index('systemctl restart mcpstack-chromium.service'),
+        )
+        self.assertLess(
+            script.index('caddy caddy validate --config /etc/caddy/Caddyfile'),
+            script.index('caddy caddy reload --config /etc/caddy/Caddyfile'),
+        )
+
     def test_hackbrowser_tools(self):
         tree = ast.parse((ROOT / "services/hackbrowser/server.py").read_text())
         exported = [
