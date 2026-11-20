@@ -110,18 +110,63 @@ def require_ok(url: str, name: str, args: dict | None = None) -> tuple[dict, dic
 
 
 def normalize_tabs(value: object) -> list[dict]:
-    """MCPServer wraps list-valued tool returns as {"result": [...]}.
+    """Unwrap a tool result without treating an empty tab list as malformed.
 
-    Some clients deserialize a top-level list directly; accept both forms,
-    but refuse unknown or empty data rather than guessing a target.
+    Different MCP clients may include one or more result envelopes.
     """
-    if isinstance(value, dict):
-        value = value.get("result")
-    if (not isinstance(value, list) or not value
-            or any(not isinstance(item, dict) or not isinstance(item.get("target_id"), str)
-                   or not item["target_id"] for item in value)):
-        raise ValueError("Unexpected browser_tabs payload; expected a non-empty list of targets")
+    for _ in range(5):
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                break
+        elif isinstance(value, dict) and "result" in value:
+            value = value["result"]
+        else:
+            break
+    if not isinstance(value, list) or any(
+        not isinstance(item, dict)
+        or not isinstance(item.get("target_id"), str)
+        or not item["target_id"]
+        for item in value
+    ):
+        raise ValueError(
+            "Unexpected browser_tabs response shape: "
+            + type(value).__name__
+            + (f"; keys={sorted(value)[:12]}" if isinstance(value, dict) else "")
+        )
     return value
+
+
+def ensure_tab(url: str, cdp_port: int) -> str:
+    """Create a blank tab only when a newly started browser really has none."""
+    _response, value = require_ok(url, "browser_tabs")
+    tabs = normalize_tabs(value)
+    if tabs:
+        return tabs[0]["target_id"]
+    with OPENER.open(f"http://127.0.0.1:{cdp_port}/json/list", timeout=3) as reply:
+        raw_targets = json.load(reply)
+    pages = [t for t in raw_targets if t.get("type") == "page"
+             and isinstance(t.get("id"), str)]
+    if pages:
+        raise RuntimeError(
+            "MCP returned no tabs but CDP has a page; investigate bridge serialization"
+        )
+    print(f"[INFO] CDP {cdp_port} has no page; creating private blank tab", flush=True)
+    req = Request(f"http://127.0.0.1:{cdp_port}/json/new?about:blank", method="PUT")
+    with OPENER.open(req, timeout=5) as reply:
+        created = json.load(reply)
+    new_id = created.get("id")
+    if not isinstance(new_id, str) or not new_id:
+        raise RuntimeError("CDP blank tab creation returned no target ID")
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        _response, value = require_ok(url, "browser_tabs")
+        tabs = normalize_tabs(value)
+        if any(t["target_id"] == new_id for t in tabs):
+            return new_id
+        time.sleep(0.2)
+    raise RuntimeError("Created tab never appeared in MCP browser_tabs")
 
 
 def wait_for_text(url: str, target_id: str, text: str) -> None:
@@ -212,13 +257,9 @@ def main() -> None:
                     assert status["cdp"] == f"http://127.0.0.1:{port}"
                 print("[PASS] Both real MCP bridges connect to their own Chromium", flush=True)
 
-                _resp, a_tabs_payload = require_ok(a_url, "browser_tabs")
-                _resp, b_tabs_payload = require_ok(b_url, "browser_tabs")
-                a_tabs = normalize_tabs(a_tabs_payload)
-                b_tabs = normalize_tabs(b_tabs_payload)
-                a_target = a_tabs[0]["target_id"]
-                b_target = b_tabs[0]["target_id"]
-                print("[PASS] Both browser_tabs responses decoded", flush=True)
+                a_target = ensure_tab(a_url, a_port)
+                b_target = ensure_tab(b_url, b_port)
+                print("[PASS] Both isolated browsers have usable page targets", flush=True)
                 assert a_target != b_target
                 base = f"http://127.0.0.1:{server.server_address[1]}"
                 require_ok(a_url, "browser_navigate", {
