@@ -159,6 +159,9 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 ## AI용 Observe → Act (공개 베타)
 
+페이지 관찰은 기본 문서와 최대 7개 iframe을 확인하며, 열린 Shadow DOM에 있는 요소도 인식합니다. 응답의 `frame`은 현재 스냅샷 내 프레임 순서이고 `in_viewport`는 화면 내부 위치 여부를 표시합니다. `allowed_actions`는 안전하게 허용되는 조작의 목록입니다. iframe이 이동·분리되거나 요소의 역할·대상·활성 상태가 바뀌면 기존 참조로 조작하지 않고 재관찰하도록 요청합니다. iframe 또는 Shadow DOM을 지원하지 않는 환경에서는 인식 범위가 제한될 수 있습니다.
+
+
 `browser_observe(target_id, max_elements=35)`는 현재 GUI 탭에서 보이는 링크·버튼·입력 컨트롤을 `e1`, `e2` 같은 단기 참조로 반환합니다. 긴 CSS 선택자를 추측할 필요가 없습니다. 응답에는 `snapshot_id`, 제목, 짧은 본문, 요소의 역할·이름이 포함되며 입력칸 값은 수집하지 않습니다.
 
 `browser_act(snapshot_id, ref, action, text?, target_id?)`는 90초 이내의 최신 참조에 대해서만 실행합니다. 지원 동작은 `click`(안전한 공개 링크·인식된 탐색 버튼), `fill`(검색어 입력), `search`(GET 검색 폼)입니다. 페이지·요소가 변경되면 중단하고 재관찰을 요구합니다. 결제·삭제·계정 변경·파일 업로드·비밀번호 입력·CAPTCHA 자동 해결은 지원하지 않습니다. 실패한 클릭을 자동 반복하지 않습니다. 기존 개별 조작 도구는 호환성을 위해 유지합니다.
