@@ -123,7 +123,15 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
   http://127.0.0.1:8088/pocmap/mcp
 ```
 
-기대 결과: `/healthz`는 **200**, 인증 없는 `/pocmap/mcp`는 **401**, MCP 도구 검색은 PocMap 22 / HackBrowser 22 / ZAP 17개입니다. `check_calls.py`는 세 백엔드의 실제 호출과 HackBrowser PNG 이미지 블록을 확인합니다.
+기대 결과: `/healthz`는 **200**, 인증 없는 `/pocmap/mcp`는 **401**, MCP 도구 검색은 PocMap 22 / HackBrowser 26 / ZAP 17개입니다. `check_calls.py`는 세 백엔드의 실제 호출과 HackBrowser PNG 이미지 블록을 확인합니다.
+
+## 채팅 속 GUI 화면 확인 및 사용자 직접 조작 (베타)
+
+`browser_screenshot`의 MCP Apps 카드에는 사용자가 직접 켜는 **4초 간격 화면 자동 갱신**, **AI 일시정지 · 직접 조작**, **화면 클릭**, **위/아래 스크롤**, **AI 제어권 반환** 기능이 있습니다. 별도 VNC 서버나 공용 실시간 스트리밍 포트는 열지 않습니다. 주기적인 갱신은 호스트가 MCP Apps `tools/call`을 지원할 때만 작동하고, 카드가 숨겨지거나 오류가 나면 멈춥니다. 따라서 실제 비디오 스트리밍이 아니라 선택형 스크린샷 폴링입니다.
+
+수동 제어권은 `browser_handoff_begin`, `browser_handoff_status`, `browser_handoff_input`, `browser_handoff_end` 4개 도구로 관리합니다. 제어 토큰은 시작 도구를 호출한 카드에만 반환되고, 상태 조회·스크린샷 메타데이터에는 포함되지 않습니다. 수동 조작 중 AI의 브라우저 쓰기를 잠그며 10분이 지나면 자동 해제됩니다. 조작은 사용자의 개별 클릭과 스크롤만 허용하며 임의 키 입력·문자 입력은 지원하지 않습니다. CAPTCHA는 기존 수동 인증 카드를 사용합니다.
+
+**중요:** 이 기능은 **동일한 GUI Chromium 프로필을 공유하는 단일 운영자용**입니다. 로그인된 MCP 사용자별 접근 격리는 제공하지 않습니다. 제어 토큰은 권한 증명이 아닌 임시 제어 수단이며, 호스트·도구 기록에 노출되지 않도록 주의해야 합니다. 비밀번호·결제·계정 변경을 이 기능으로 진행하지 마세요. 외부에 CDP `9223`이나 인증 없는 MCP 엔드포인트를 개방하지 마세요.
 
 ## HackBrowser 스크린샷 미리보기 및 PNG 다운로드
 
@@ -173,7 +181,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 좌표 클릭 도구는 Playwright Python `mouse.click(x, y)`를 사용하며, 뷰포트 바깥 좌표는 거부합니다. 텍스트가 여러 요소에 중복 매칭되면 첫 요소를 임의로 클릭하지 않고 `ok:false`와 일치 개수를 반환합니다. 텍스트 클릭 실패 시 `browser_elements`에서 특정 CSS 선택자를 확인하세요.
 
 
-Playwright는 **이미 실행 중인 GUI Chromium의 로컬 CDP 9223**에만 연결합니다. 새 브라우저/프로필을 생성하거나 로그인 쿠키를 초기화하지 않습니다. 기존 13개 도구는 유지하고, 아래 도구 3개가 추가되어 HackBrowser는 기존 16개 도구와 신규 워크플로 3개로 총 22개입니다.
+Playwright는 **이미 실행 중인 GUI Chromium의 로컬 CDP 9223**에만 연결합니다. 새 브라우저/프로필을 생성하거나 로그인 쿠키를 초기화하지 않습니다. 기존 13개 도구는 유지하고, 아래 도구 3개가 추가되어 HackBrowser는 수동 제어권 인계 도구를 포함하여 총 26개입니다.
 
 - `browser_click`: Playwright 실제 클릭, 동작 가능 여부 대기, URL/새 탭 감지
 - `browser_fill`: 실제 입력 이벤트와 입력 유지 여부 검사(비밀번호 및 본문 내용은 응답하지 않음)
