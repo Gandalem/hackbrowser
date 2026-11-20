@@ -85,6 +85,7 @@ PY
 mkdir -p "$ROOT/services" "$ROOT/scripts" "$ROOT/templates" "$ROOT/docs" "$ROOT/runtime/secrets" "$ROOT/runtime/caddy/data" "$ROOT/runtime/caddy/config" "$ROOT/runtime/zap"
 if [[ "$SOURCE_DIR" != "$ROOT" ]]; then
   cp -a "$SOURCE_DIR/services/." "$ROOT/services/"
+  rm -f -- "$ROOT/services/gateway/screenshot_download.py"
   cp -a "$SOURCE_DIR/scripts/." "$ROOT/scripts/"
   cp -a "$SOURCE_DIR/templates/." "$ROOT/templates/"
   cp -a "$SOURCE_DIR/docs/." "$ROOT/docs/"
