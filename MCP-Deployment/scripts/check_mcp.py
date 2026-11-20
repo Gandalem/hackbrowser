@@ -57,7 +57,7 @@ def rpc(service, method, params=None, proto="2026-07-28"):
     return data.get("result", {})
 
 
-EXPECTED = {"pocmap": 22, "hackbrowser": 22, "zap": 17}
+EXPECTED = {"pocmap": 22, "hackbrowser": 26, "zap": 17}
 failures = []
 for service in EXPECTED:
     try:
