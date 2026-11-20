@@ -302,8 +302,22 @@ class WorkflowManager:
                         )
                     elif state != "ok":
                         task.update(status="stopped", reason=state)
-            if task["index"] == len(task["steps"]) and task["status"] == "yielded":
-                task.update(status="finished", reason=None)
+            if (task["index"] == len(task["steps"]) and
+                    task["status"] in {"yielded", "paused_verification", "paused_login"}):
+                try:
+                    end_state = self.gate(task["target_id"]).get("state", "unsafe_page")
+                except Exception as exc:
+                    task.update(status="stopped", reason="gate_failed",
+                                last_error=type(exc).__name__)
+                else:
+                    if end_state == "ok":
+                        task.update(status="finished", reason=None, last_error=None)
+                    elif end_state in {"verification_required", "login_required"}:
+                        task.update(status="paused_verification" if end_state ==
+                                    "verification_required" else "paused_login",
+                                    reason=end_state)
+                    else:
+                        task.update(status="stopped", reason=end_state)
             elif task["status"] == "yielded" and task["reason"] is None:
                 task["reason"] = "batch_boundary"
             return self._snapshot(task)
