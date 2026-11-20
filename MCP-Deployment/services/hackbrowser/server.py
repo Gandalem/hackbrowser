@@ -174,17 +174,33 @@ def _verification_reason(url: str, text: str) -> str | None:
 
 
 def _verification_state(target_id: str) -> dict:
-    """Inspect the current page without extracting a CAPTCHA answer."""
-    value = _evaluate("""(function(){return {
-      url:location.href,
-      text:(document.body?document.body.innerText:'').slice(0,4000),
-      viewport:{width:innerWidth,height:innerHeight}
-    };})()""", target_id)
+    """Inspect challenge indicators, never attempt to solve a CAPTCHA."""
+    value = _evaluate("""(function(){
+      var frames=Array.from(document.querySelectorAll('iframe[src]'));
+      var recaptcha=frames.some(function(f){
+        try { return /(^|\\.)google\\.com$|(^|\\.)recaptcha\\.net$/.test(new URL(f.src).hostname) &&
+          /\\/recaptcha\\/api2\\//.test(new URL(f.src).pathname); }
+        catch (_) { return false; }
+      });
+      var response=document.querySelector('textarea[name="g-recaptcha-response"]');
+      return {
+        url:location.href,
+        text:(document.body?document.body.innerText:'').slice(0,4000),
+        viewport:{width:innerWidth,height:innerHeight},
+        recaptcha_present:recaptcha,
+        recaptcha_completed:!!(response && response.value && response.value.trim())
+      };
+    })()""", target_id)
     if not isinstance(value, dict):
         return {}
     reason = _verification_reason(value.get("url", ""), value.get("text", ""))
+    completed = bool(value.get("recaptcha_present") and value.get("recaptcha_completed"))
+    if value.get("recaptcha_present") and not completed and not reason:
+        reason = "Google reCAPTCHA: 화면에서 사용자가 직접 확인해야 합니다"
     return {"url": value.get("url", ""), "viewport": value.get("viewport", {}),
-            "verification_reason": reason}
+            "verification_reason": None if completed else reason,
+            "verification_completed": completed}
+
 
 
 def _site_key(host: str) -> str:
@@ -566,6 +582,9 @@ def browser_screenshot(target_id: str | None = None) -> list[TextContent | Image
     try:
         selected = _target(target_id)
         state = _verification_state(selected["id"])
+        metadata["target_id"] = selected["id"]
+        if state.get("verification_completed"):
+            metadata["verification_status"] = "completed"
         if state.get("verification_reason"):
             viewport = state.get("viewport") or {}
             width, height = viewport.get("width"), viewport.get("height")
@@ -582,6 +601,7 @@ def browser_screenshot(target_id: str | None = None) -> list[TextContent | Image
                         "url": state["url"],
                         "viewport": (width, height),
                         "expires_at": now + VERIFICATION_TTL_SECONDS,
+                        "clicks": 0,
                     }
                 metadata["verification"] = {
                     "required": True,
@@ -606,6 +626,44 @@ def _click_at(target_id: str, x: int, y: int) -> None:
             "type": event_type, "x": x, "y": y, "button": "left",
             "clickCount": 1,
         }, target_id)
+
+
+@mcp.tool()
+def browser_verification_click(verification_id: str, x: int, y: int) -> dict:
+    """Relay ONE coordinate clicked by the human in a CAPTCHA screenshot.
+
+    Does not choose challenge answers, loop, or automatically retry. A bounded
+    session stays valid for a finite number of user-initiated interactions.
+    """
+    if not isinstance(verification_id, str) or not verification_id:
+        raise ValueError("A verification ID from browser_screenshot is required")
+    if any(not isinstance(n, int) or isinstance(n, bool) for n in (x, y)):
+        raise ValueError("Click position must be integer pixels")
+    with _verification_lock:
+        session = _verification_sessions.get(verification_id)
+        if not session or session["expires_at"] <= time.monotonic():
+            _verification_sessions.pop(verification_id, None)
+            raise ValueError("Verification expired; capture a fresh screenshot")
+        width, height = session["viewport"]
+        if not (0 <= x < width and 0 <= y < height):
+            raise ValueError("Click is outside the captured viewport")
+        clicks = session.get("clicks", 0)
+        if clicks >= 24:
+            _verification_sessions.pop(verification_id, None)
+            raise ValueError("Maximum manual clicks reached; capture a fresh screenshot")
+        session["clicks"] = clicks + 1
+
+    selected = _target(session["target_id"])
+    state = _verification_state(selected["id"])
+    if (state.get("url") != session["url"]
+            or state.get("viewport") != {"width": width, "height": height}
+            or not state.get("verification_reason")):
+        with _verification_lock:
+            _verification_sessions.pop(verification_id, None)
+        raise RuntimeError("Verification page changed; capture a fresh screenshot")
+    _click_at(selected["id"], x, y)
+    return {"ok": True, "clicked": True, "verification_status": "pending",
+            "message": "선택한 위치를 GUI Chromium에 전달했습니다. 새 화면을 확인하세요."}
 
 
 @mcp.tool()

@@ -71,7 +71,7 @@ class ScreenshotAppProtocolTests(unittest.TestCase):
             self.assertIn("io.modelcontextprotocol/ui", str(discovery))
             tools = rpc(port, "tools/list", {"_meta": META})["tools"]
             names = [tool["name"] for tool in tools]
-            self.assertEqual(len(names), 12)
+            self.assertEqual(len(names), 13)
             for name in ("browser_screenshot", "browser_keypress", "browser_scroll", "browser_wait_for", "browser_submit_verification"):
                 self.assertIn(name, names)
             screenshot = next(tool for tool in tools if tool["name"] == "browser_screenshot")
