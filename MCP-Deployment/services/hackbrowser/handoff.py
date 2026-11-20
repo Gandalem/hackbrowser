@@ -97,3 +97,7 @@ class ManualHandoff:
                 "target_id": lease["target_id"],
                 "message": "Manual control ended. Inspect the page before AI continues.",
             }
+
+
+# Shared across server-side CDP and the dedicated Playwright worker.
+manual_handoff = ManualHandoff()
