@@ -6,6 +6,9 @@ This helper never solves challenges, modifies profiles, or opens external CDP po
 from __future__ import annotations
 
 from urllib.parse import urlsplit
+import queue
+import threading
+from concurrent.futures import Future
 
 ACTION_TIMEOUT_MS = 10000
 CONNECT_TIMEOUT_MS = 8000
@@ -72,94 +75,152 @@ def _choose_text_locator(page, text: str, role: str, exact: bool):
     return locator.first
 
 
+def _run_connected(browser, selected: dict, action: str, args: dict,
+                   list_targets) -> dict:
+    """Apply exactly one action with a Playwright connection owned by the worker."""
+    if not browser.contexts:
+        raise RuntimeError("GUI Chromium has no browser context")
+    context = browser.contexts[0]
+    page = _find_page(context, selected)
+    before_targets = _safe_targets(list_targets)
+    before_ids = {item["id"] for item in before_targets}
+    before_url = page.url
+    before_text = _body_sample(page) if action in {"click", "click_text", "press", "click_at"} else ""
+    result = {"ok": True, "action": action, "target_id": selected["id"]}
+    try:
+        if action == "click":
+            page.locator(args["selector"]).first.click(timeout=ACTION_TIMEOUT_MS)
+        elif action == "click_text":
+            locator = _choose_text_locator(
+                page, args["text"], args["role"], args["exact"]
+            )
+            locator.click(timeout=ACTION_TIMEOUT_MS)
+        elif action == "fill":
+            locator = page.locator(args["selector"]).first
+            locator.fill(args["value"], timeout=ACTION_TIMEOUT_MS)
+            result["value_confirmed"] = locator.input_value() == args["value"]
+        elif action == "press":
+            page.locator(args["selector"]).first.press(
+                args["key"], timeout=ACTION_TIMEOUT_MS
+            )
+            result["key"] = args["key"]
+        elif action == "click_at":
+            viewport = page.evaluate("() => ({width: innerWidth, height: innerHeight})")
+            x, y = args["x"], args["y"]
+            if not (0 <= x < viewport["width"] and 0 <= y < viewport["height"]):
+                raise ValueError("Click position is outside the GUI viewport")
+            page.mouse.click(x, y)
+        else:
+            raise ValueError("Unsupported browser operation")
+    except ValueError as exc:
+        # Ambiguous visible labels are expected on real sites. Report the
+        # reason instead of surfacing an opaque MCP execution exception.
+        return {"ok": False, "action": action, "target_id": selected["id"],
+                "error": str(exc)}
+    except (PWTimeout, PlaywrightError) as exc:
+        # Never repeat a click if the outcome is ambiguous.
+        return {"ok": False, "action": action, "target_id": selected["id"],
+                "error": f"Playwright action failed ({type(exc).__name__}); "
+                         "inspect the page before retrying"}
+
+    if action == "fill":
+        return result
+
+    try:
+        page.wait_for_timeout(SETTLE_MS)
+    except PlaywrightError:
+        pass  # The click may have closed/navigated the original tab.
+    after_targets = _safe_targets(list_targets)
+    new_tabs = [
+        {"target_id": item["id"], "url": item.get("url", ""),
+         "title": item.get("title", "")}
+        for item in after_targets
+        if item.get("id") not in before_ids
+    ]
+    after_url = None if page.is_closed() else page.url
+    changed = bool(after_url != before_url)
+    result.update({
+        "url_before": before_url,
+        "url_after": after_url,
+        "url_changed": changed,
+        "new_tabs": new_tabs,
+        "next_target_id": new_tabs[0]["target_id"] if new_tabs else selected["id"],
+        "content_changed": (
+            bool(before_text != _body_sample(page)) if not page.is_closed() else False
+        ),
+    })
+    result["effect_observed"] = bool(
+        result["url_changed"] or result["new_tabs"] or result["content_changed"]
+    )
+    return result
+
+
+class _GuiWorker:
+    """Single owner of sync Playwright. Calls are serialized; session is reused."""
+
+    def __init__(self):
+        self.jobs = queue.Queue(maxsize=64)
+        self.lock = threading.Lock()
+        self.thread = None
+        self.started = 0
+
+    def submit(self, cdp_root, selected, action, args, list_targets):
+        result = Future()
+        with self.lock:
+            if self.thread is None or not self.thread.is_alive():
+                self.thread = threading.Thread(
+                    target=self._run, name="hackbrowser-gui-playwright", daemon=True
+                )
+                self.thread.start()
+        try:
+            self.jobs.put_nowait((result, cdp_root, selected, action, args, list_targets))
+        except queue.Full:
+            raise RuntimeError("GUI browser action queue is full")
+        # Wait long enough for one 10s action plus a potential pre-action
+        # reconnection. A timed-out action must never be implicitly retried.
+        return result.result(timeout=35)
+
+    def _run(self):
+        from playwright.sync_api import sync_playwright
+
+        browser = None
+        with sync_playwright() as playwright:
+            while True:
+                future, cdp_root, selected, action, args, targets = self.jobs.get()
+                if not future.set_running_or_notify_cancel():
+                    continue
+                try:
+                    _validate_cdp(cdp_root)
+                    if browser is None or not browser.is_connected():
+                        # Reconnect ONLY before executing a queued action,
+                        # never after an uncertain click or form submission.
+                        browser = playwright.chromium.connect_over_cdp(
+                            cdp_root, timeout=CONNECT_TIMEOUT_MS
+                        )
+                        self.started += 1
+                    result = _run_connected(browser, selected, action, args, targets)
+                    future.set_result(result)
+                except Exception as exc:
+                    # Drop a stale transport, but DO NOT retry this action.
+                    browser = None
+                    future.set_exception(exc)
+                finally:
+                    self.jobs.task_done()
+
+
+def _validate_cdp(cdp_root: str) -> None:
+    parsed = urlsplit(cdp_root)
+    if (parsed.scheme != "http" or parsed.hostname != "127.0.0.1"
+            or parsed.port != 9223 or parsed.path not in {"", "/"}
+            or parsed.username or parsed.password):
+        raise RuntimeError("Only the managed local GUI Chromium CDP 9223 is allowed")
+
+
+_gui_worker = _GuiWorker()
+
+
 def run_action(cdp_root: str, selected: dict, action: str, args: dict,
                list_targets) -> dict:
-    """Perform exactly one action, then report observed navigation/popup state.
-
-    The attached browser is not closed; exiting sync_playwright only disconnects
-    the temporary automation transport, preserving the GUI profile/cookies.
-    """
-    if urlsplit(cdp_root).hostname != "127.0.0.1" or not cdp_root.endswith(":9223"):
-        raise RuntimeError("Only the managed local GUI Chromium CDP 9223 is allowed")
-    from playwright.sync_api import Error as PlaywrightError, TimeoutError as PWTimeout
-    from playwright.sync_api import sync_playwright
-
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.connect_over_cdp(
-            cdp_root, timeout=CONNECT_TIMEOUT_MS
-        )
-        if not browser.contexts:
-            raise RuntimeError("GUI Chromium has no browser context")
-        context = browser.contexts[0]
-        page = _find_page(context, selected)
-        before_targets = _safe_targets(list_targets)
-        before_ids = {item["id"] for item in before_targets}
-        before_url = page.url
-        before_text = _body_sample(page) if action in {"click", "click_text", "press", "click_at"} else ""
-        result = {"ok": True, "action": action, "target_id": selected["id"]}
-        try:
-            if action == "click":
-                page.locator(args["selector"]).first.click(timeout=ACTION_TIMEOUT_MS)
-            elif action == "click_text":
-                locator = _choose_text_locator(
-                    page, args["text"], args["role"], args["exact"]
-                )
-                locator.click(timeout=ACTION_TIMEOUT_MS)
-            elif action == "fill":
-                locator = page.locator(args["selector"]).first
-                locator.fill(args["value"], timeout=ACTION_TIMEOUT_MS)
-                result["value_confirmed"] = locator.input_value() == args["value"]
-            elif action == "press":
-                page.locator(args["selector"]).first.press(
-                    args["key"], timeout=ACTION_TIMEOUT_MS
-                )
-                result["key"] = args["key"]
-            elif action == "click_at":
-                viewport = page.evaluate("() => ({width: innerWidth, height: innerHeight})")
-                x, y = args["x"], args["y"]
-                if not (0 <= x < viewport["width"] and 0 <= y < viewport["height"]):
-                    raise ValueError("Click position is outside the GUI viewport")
-                page.mouse.click(x, y)
-            else:
-                raise ValueError("Unsupported browser operation")
-        except ValueError as exc:
-            # Ambiguous visible labels are expected on real sites. Report the
-            # reason instead of surfacing an opaque MCP execution exception.
-            return {"ok": False, "action": action, "target_id": selected["id"],
-                    "error": str(exc)}
-        except (PWTimeout, PlaywrightError) as exc:
-            # Never repeat a click if the outcome is ambiguous.
-            return {"ok": False, "action": action, "target_id": selected["id"],
-                    "error": f"Playwright action failed ({type(exc).__name__}); "
-                             "inspect the page before retrying"}
-
-        if action == "fill":
-            return result
-
-        try:
-            page.wait_for_timeout(SETTLE_MS)
-        except PlaywrightError:
-            pass  # The click may have closed/navigated the original tab.
-        after_targets = _safe_targets(list_targets)
-        new_tabs = [
-            {"target_id": item["id"], "url": item.get("url", ""),
-             "title": item.get("title", "")}
-            for item in after_targets
-            if item.get("id") not in before_ids
-        ]
-        after_url = None if page.is_closed() else page.url
-        changed = bool(after_url != before_url)
-        result.update({
-            "url_before": before_url,
-            "url_after": after_url,
-            "url_changed": changed,
-            "new_tabs": new_tabs,
-            "next_target_id": new_tabs[0]["target_id"] if new_tabs else selected["id"],
-            "content_changed": (
-                bool(before_text != _body_sample(page)) if not page.is_closed() else False
-            ),
-        })
-        result["effect_observed"] = bool(
-            result["url_changed"] or result["new_tabs"] or result["content_changed"]
-        )
-        return result
+    """Queue a single action on the persistent GUI Playwright connection."""
+    _validate_cdp(cdp_root)
+    return _gui_worker.submit(cdp_root, selected, action, args, list_targets)
