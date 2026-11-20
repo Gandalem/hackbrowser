@@ -18,8 +18,8 @@ from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "scripts"))
-from smoke_isolated_browser import cookie_value, ensure_tab, require_ok, wait_for_text
-from isolated_backends import IsolatedBackends
+from smoke_isolated_browser import cookie_value, ensure_tab, require_ok, wait_for_text  # noqa: E402
+from isolated_backends import IsolatedBackends  # noqa: E402
 
 
 class CookieSite(BaseHTTPRequestHandler):
