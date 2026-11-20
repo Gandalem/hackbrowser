@@ -1,24 +1,90 @@
-# Isolated browser sessions (work in progress)
+# Isolated browser sessions (opt-in beta)
 
-This module is an **opt-in foundation**, not yet a multi-user security feature.
+The OAuth gateway now supports per-user Chromium **and per-user MCP bridge
+processes**. Existing deployments stay in `single` mode by default.
 
-`session_pool.py` starts an independent local Chromium process and persistent profile for each **trusted upstream user subject**, with a maximum of two concurrent processes by default. An idle process can be stopped without deleting its profile. Each instance uses a distinct localhost CDP port.
+## Design
 
-**Not wired to the MCP server yet.** Existing deployments continue to use the single Chromium/CDP endpoint. Do **not** enable a multi-user rollout based on this module alone: the current MCP bridge still has shared mutable state, a fixed CDP address, and shared screenshot/handoff/workflow registries. Keycloak's validated identity must be propagated through the gateway and bound to all tool calls before selecting a session. A client-provided `owner_id` or header is not trusted identity.
+- JWT is validated at the OAuth gateway for the HackBrowser audience, scope,
+  authorized client, issuer, signature and expiry.
+- The gateway selects a backend from the **verified** issuer + `sub` claim.
+  Browser tools never accept a client-selected user ID.
+- Each backend has its own Chromium profile, localhost-only CDP port, private
+  Xvfb display, MCP HTTP port, and separate in-memory state for screenshots,
+  verification, tabs, handoff and workflows.
+- The pool refuses new users at its configured limit, without falling back to
+  the legacy shared browser. Idle backends exit; persistent profiles remain.
+- Anonymous share-link requests to HackBrowser are refused when isolated mode
+  is enabled. PocMap and ZAP share-link behavior is unchanged.
+- All services still run as the `mcpstack` Linux user: this is application-level
+  isolation, **not** a hardened OS/container security boundary against an
+  attacker who has code execution on the host.
 
-Remaining integration requirements:
+## Enabling on an existing server (do not reinstall)
 
-1. Validate authenticated Keycloak subject and issuer at the gateway, with fail-closed identity propagation and no identity supplied by tool arguments.
-2. Pass per-request identity into every browser tool and choose the owner's CDP endpoint (including Playwright, screenshots, tab enumeration and CDP websockets).
-3. Partition manual handoff, workflow, snapshot, verification, rate limit and browser-tab state per user. Reject access to another user's IDs, even if guessed.
-4. Ensure browser process termination on server shutdown, enforce per-session memory limits, and test profile restore, idle eviction, port conflicts, and concurrent accounts.
-5. Run two real OAuth accounts through the proxy to prove that cookies, screenshots, pages and control tokens never cross users.
-
-Existing single-user installation and configuration are unchanged. Avoid exposing any CDP port externally.
-
-Run unit tests from the service directory:
+Only enable after reviewing the code and with verified OAuth accounts.
+The following assumes standard installation at /opt/mcp-deployment.
 
 ```bash
-cd MCP-Deployment/services/hackbrowser
-python3 -m unittest -v test_session_pool.py
+sudo install -d -m 0700 -o mcpstack -g mcpstack \
+  /opt/mcp-deployment/runtime/isolated-browser-profiles
+sudoedit /opt/mcp-deployment/runtime/public.env
+```
+
+Set these values in `public.env`:
+
+```dotenv
+ENABLE_OAUTH=1
+BROWSER_SESSION_MODE=isolated
+BROWSER_MAX_SESSIONS=2
+BROWSER_IDLE_SECONDS=900
+```
+
+Restart the OAuth and share gateways after safely deploying updated service
+files (leave existing Chromium and its profile untouched):
+
+```bash
+sudo systemctl restart mcpstack-oauth.service mcpstack-share.service
+sudo systemctl status mcpstack-oauth.service --no-pager
+```
+
+The gateway starts a new Xvfb + Chromium + MCP bridge lazily for the first
+authenticated request from each user. No migration of existing personal cookies
+is attempted; each user signs in again in their isolated profile.
+
+Switch back to `BROWSER_SESSION_MODE=single` and restart the gateways to
+restore existing behavior without deleting isolated user profile directories.
+
+## Limitations and verification needed
+
+- This code has **not yet passed an OCI two-user live test**; do not consider
+  it production multi-tenant isolation until that test succeeds.
+- Isolated processes share the same Unix uid; for untrusted third parties use
+  container/user-namespace boundaries and enforce per-process memory quotas.
+- No native per-process memory quota is implemented; `MAX_SESSIONS=2` bounds
+  the number of active browsers, not total RAM consumption.
+- CDP and MCP backends listen on localhost only, but are unauthenticated at that
+  level. Prevent other untrusted local processes from accessing those ports.
+- Existing MCP sessions may need to reinitialize after idle shutdown or server
+  restart; profile cookies persist, but transient MCP states do not.
+- Shared persistent profiles are never automatically deleted. Account deletion
+  and quota management require additional work.
+
+## Required end-to-end tests
+
+1. Two valid OAuth accounts have different CDP endpoints, tabs and screenshots.
+2. Account A cannot use B's target ID, snapshot ID, verification ID,
+   handoff control token or workflow ID.
+3. Invalid JWT and missing scopes get 401, not the legacy shared profile.
+4. Share-link HackBrowser access gets 403 in isolated mode.
+5. With two active users, the third receives 503 without cross-session fallback.
+6. Idle browser shutdown, profile restore and OAuth gateway restart work.
+7. Concurrent page actions and long-lived SSE streams do not evict active users.
+8. Monitor real CPU/RAM on the 3-vCPU/16-GB OCI server.
+
+Unit tests for the pool:
+
+```bash
+cd /opt/mcp-deployment/services/hackbrowser
+/opt/mcp-deployment/runtime/venv-hackbrowser/bin/python -m unittest -v test_session_pool.py
 ```
