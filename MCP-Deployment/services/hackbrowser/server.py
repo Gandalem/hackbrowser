@@ -1065,4 +1065,10 @@ def browser_submit_verification(verification_id: str, answer: str,
 
 if __name__ == "__main__":
     # Bind localhost only. For remote access use SSH forwarding or an authenticated HTTPS reverse proxy.
-    mcp.run(transport="streamable-http", host="127.0.0.1", port=MCP_PORT, json_response=True)
+    # Only the explicit localhost-only standalone Docker profile may opt in
+    # to listening on the container interface for 127.0.0.1 host port mapping.
+    bind_host = os.environ.get("HACKBROWSER_MCP_HOST", "127.0.0.1")
+    if bind_host not in {"127.0.0.1", "0.0.0.0"}:
+        raise ValueError("HACKBROWSER_MCP_HOST must be 127.0.0.1 or 0.0.0.0")
+    mcp.run(transport="streamable-http", host=bind_host,
+            port=MCP_PORT, json_response=True)
