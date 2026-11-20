@@ -37,4 +37,4 @@ docker compose -f standalone/compose.yml down
   browser profile data; `down` alone does not.
 - This setup is **not** a public ChatGPT connector. For remote ChatGPT with
   HTTPS/OAuth use the [full deployment](../MCP-Deployment/README.md).
-- Build and runtime compatibility on each host must be verified separately.
+- A Linux ARM64 image was built and started in GitHub Actions with live MCP discovery and CDP checks. Other host architectures and local Docker configurations need independent verification.
