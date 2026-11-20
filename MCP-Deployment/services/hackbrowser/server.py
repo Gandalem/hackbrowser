@@ -142,6 +142,12 @@ def _evaluate(expression: str, target_id: str | None = None,
     return remote.get("description", "")
 
 
+def _gui_action(selected: dict, action: str, args: dict) -> dict:
+    """Use the existing GUI CDP session; never spawn or reset Chromium."""
+    from playwright_control import run_action
+    return run_action(CDP_ROOT, selected, action, args, _targets)
+
+
 def _restriction_reason(url: str, text: str) -> str | None:
     """Classify explicit access-denial pages, not ordinary empty or slow pages."""
     parsed = urlsplit(url)
@@ -373,47 +379,76 @@ def browser_elements(target_id: str | None = None, max_items: int = 30) -> dict:
 
 @mcp.tool()
 def browser_click(selector: str, target_id: str | None = None) -> dict:
-    """Click one CSS-selector-matched element in the current page."""
-    if not selector or len(selector) > 512:
+    """Click a CSS element with Playwright; report any new tab or navigation."""
+    if not isinstance(selector, str) or not 1 <= len(selector) <= 512:
         raise ValueError("selector must contain 1-512 characters")
     selected = _target(target_id)
-    current_host = urlsplit(selected.get("url", "")).hostname
-    if current_host:
-        _pace_navigation(current_host.lower())
-    expression = """(function(){
-      var el=document.querySelector(%s);
-      if(!el)return {ok:false,error:'No element matches selector'};
-      if(el.disabled)return {ok:false,error:'Element is disabled'};
-      var style=getComputedStyle(el),rect=el.getBoundingClientRect();
-      if(style.display==='none'||style.visibility==='hidden'||rect.width===0||rect.height===0)
-        return {ok:false,error:'Element is not visible'};
-      el.scrollIntoView({block:'center',inline:'nearest'});
-      el.click(); return {ok:true};
-    })()""" % json.dumps(selector)
-    value = _evaluate(expression, selected["id"])
-    return value if isinstance(value, dict) else {"result": value}
+    host = urlsplit(selected.get("url", "")).hostname
+    if host:
+        _pace_navigation(host.lower())
+    return _gui_action(selected, "click", {"selector": selector})
 
 
 @mcp.tool()
 def browser_fill(selector: str, value: str, target_id: str | None = None) -> dict:
-    """Set a text input by CSS selector and dispatch input/change events. Does not log value."""
-    if not selector or len(selector) > 512 or len(value) > 10_000:
+    """Fill a field using real browser input events. Never log submitted values."""
+    if (not isinstance(selector, str) or not 1 <= len(selector) <= 512
+            or not isinstance(value, str) or len(value) > 10_000):
         raise ValueError("Invalid selector or value too long")
-    expression = """(function(){
-      var el=document.querySelector(%s);
-      if(!el)return {ok:false,error:'No element matches selector'};
-      if(!('value' in el))return {ok:false,error:'Not an input element'};
-      el.focus();
-      var proto=Object.getPrototypeOf(el);
-      var descriptor=Object.getOwnPropertyDescriptor(proto,'value');
-      if(descriptor&&descriptor.set)descriptor.set.call(el,%s);
-      else el.value=%s;
-      el.dispatchEvent(new Event('input',{bubbles:true}));
-      el.dispatchEvent(new Event('change',{bubbles:true}));
-      return {ok:true};
-    })()""" % (json.dumps(selector), json.dumps(value), json.dumps(value))
-    result = _evaluate(expression, target_id)
-    return result if isinstance(result, dict) else {"result": result}
+    selected = _target(target_id)
+    return _gui_action(selected, "fill", {"selector": selector, "value": value})
+
+
+@mcp.tool()
+def browser_click_text(text: str, role: str = "button", exact: bool = True,
+                       target_id: str | None = None) -> dict:
+    """Click one element by accessible text/role; rejects ambiguous matches."""
+    if not isinstance(text, str) or not 1 <= len(text) <= 150:
+        raise ValueError("text must contain 1-150 characters")
+    if role not in {"button", "link", "tab", "text"}:
+        raise ValueError("role must be button, link, tab, or text")
+    if not isinstance(exact, bool):
+        raise ValueError("exact must be a boolean")
+    selected = _target(target_id)
+    host = urlsplit(selected.get("url", "")).hostname
+    if host:
+        _pace_navigation(host.lower())
+    return _gui_action(selected, "click_text", {
+        "text": text, "role": role, "exact": exact,
+    })
+
+
+@mcp.tool()
+def browser_fill_and_submit(selector: str, value: str, key: str = "Enter",
+                            target_id: str | None = None) -> dict:
+    """Fill a search field, then press Enter once and inspect the resulting page."""
+    if (not isinstance(selector, str) or not 1 <= len(selector) <= 512
+            or not isinstance(value, str) or len(value) > 10_000):
+        raise ValueError("Invalid selector or value too long")
+    if key != "Enter":
+        raise ValueError("Only Enter submission is supported")
+    selected = _target(target_id)
+    host = urlsplit(selected.get("url", "")).hostname
+    if host:
+        _pace_navigation(host.lower())
+    filled = _gui_action(selected, "fill", {"selector": selector, "value": value})
+    if not filled.get("ok") or not filled.get("value_confirmed"):
+        return {"ok": False, "stage": "fill", "error": "Field did not retain the input"}
+    result = _gui_action(selected, "press", {"selector": selector, "key": key})
+    result["input_confirmed"] = True
+    return result
+
+
+@mcp.tool()
+def browser_click_at(x: int, y: int, target_id: str | None = None) -> dict:
+    """Click exact GUI viewport coordinates once (not for automated CAPTCHA solving)."""
+    if any(type(v) is not int for v in (x, y)):
+        raise ValueError("Coordinates must be integers")
+    selected = _target(target_id)
+    host = urlsplit(selected.get("url", "")).hostname
+    if host:
+        _pace_navigation(host.lower())
+    return _gui_action(selected, "click_at", {"x": x, "y": y})
 
 
 # Named keys only: this MCP tool never accepts raw CDP commands or scripts.

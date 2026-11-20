@@ -246,7 +246,8 @@ python3 -m venv "$ROOT/runtime/venv-hackbrowser"
 python3 -m venv "$ROOT/runtime/venv-gateway"
 "$ROOT/runtime/venv-gateway/bin/python" -m pip install --disable-pip-version-check 'aiohttp>=3.12,<4' 'PyJWT[crypto]>=2.10,<3'
 "$ROOT/runtime/venv-gateway/bin/python" -m py_compile "$ROOT/services/gateway/"*.py
-"$ROOT/runtime/venv-hackbrowser/bin/python" -m py_compile "$ROOT/services/hackbrowser/server.py"
+"$ROOT/runtime/venv-hackbrowser/bin/python" -m py_compile \
+  "$ROOT/services/hackbrowser/server.py" "$ROOT/services/hackbrowser/playwright_control.py"
 # venvs are created by root under umask 077; services run as mcpstack.
 chmod -R a+rX "$ROOT/runtime/venv-pocmap" "$ROOT/runtime/venv-hackbrowser" "$ROOT/runtime/venv-gateway"
 

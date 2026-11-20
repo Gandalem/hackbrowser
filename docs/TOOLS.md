@@ -106,3 +106,9 @@ sudo python3 /opt/mcp-deployment/scripts/check_calls.py
 스크린샷은 HackBrowser의 `browser_screenshot`이 서버에 PNG를 저장하지 않고 MCP `image/png` 블록을 반환합니다. 클라이언트가 이미지 콘텐츠 렌더링을 지원하지 않으면 채팅에서 그림이 보이지 않을 수 있습니다. ZAP 능동 스캔은 허가된 대상에서만 수행하세요.
 
 - \`browser_verification_click\`: 사용자가 스크린샷에서 직접 선택한 CAPTCHA 위치를 GUI Chromium에 1회 전달합니다. 자동 풀이 또는 우회는 지원하지 않습니다.\n
+### GUI Chromium Playwright operations
+
+- `browser_click_text(text, role, exact, target_id)`: find a human-readable button/link/tab/text, click once, detect new tabs
+- `browser_fill_and_submit(selector, value, key, target_id)`: fill then press Enter once and verify change
+- `browser_click_at(x, y, target_id)`: click GUI viewport coordinates once for ordinary interactions, not CAPTCHA solving
+- `browser_click` and `browser_fill` use Playwright's actionability checks, reporting observed URL/content changes and newly opened tabs. CDP 9223 is reused; no profile reinitialization.
