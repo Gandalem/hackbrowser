@@ -89,20 +89,35 @@ def rpc(url: str, method: str, params: dict | None = None) -> dict:
     return result.get("result", {})
 
 
-def tool(url: str, name: str, args: dict | None = None) -> tuple[dict, dict]:
+def decode_tool_content(response: dict) -> object:
+    """Decode all MCP text blocks, not just the first tab in a list result."""
+    blocks = response.get("content", [])
+    if not isinstance(blocks, list):
+        raise ValueError("Malformed MCP content")
+    values = []
+    for part in blocks:
+        if not isinstance(part, dict) or part.get("type") != "text":
+            continue
+        text = part.get("text")
+        if not isinstance(text, str):
+            raise ValueError("MCP text block is not a string")
+        try:
+            values.append(json.loads(text))
+        except ValueError:
+            values.append({"text": text})
+    if not values:
+        return []
+    return values[0] if len(values) == 1 else values
+
+
+def tool(url: str, name: str, args: dict | None = None) -> tuple[dict, object]:
     response = rpc(url, "tools/call", {
         "name": name, "arguments": args or {}, "_meta": META,
     })
-    text = next((part.get("text") for part in response.get("content", [])
-                 if part.get("type") == "text"), None)
-    try:
-        value = json.loads(text) if text else {}
-    except (TypeError, ValueError):
-        value = {"text": text}
-    return response, value
+    return response, decode_tool_content(response)
 
 
-def require_ok(url: str, name: str, args: dict | None = None) -> tuple[dict, dict]:
+def require_ok(url: str, name: str, args: dict | None = None) -> tuple[dict, object]:
     response, value = tool(url, name, args)
     if response.get("isError"):
         raise RuntimeError(f"{name}: {str(value)[:200]}")
@@ -124,6 +139,8 @@ def normalize_tabs(value: object) -> list[dict]:
             value = value["result"]
         else:
             break
+    if isinstance(value, dict) and isinstance(value.get("target_id"), str):
+        value = [value]
     if not isinstance(value, list) or any(
         not isinstance(item, dict)
         or not isinstance(item.get("target_id"), str)
