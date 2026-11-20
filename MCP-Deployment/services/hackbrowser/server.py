@@ -231,7 +231,7 @@ def browser_fill(selector: str, value: str, target_id: str | None = None) -> dic
 
 @mcp.tool(meta={"ui": {"resourceUri": SCREENSHOT_UI_URI}, "openai/outputTemplate": SCREENSHOT_UI_URI})
 def browser_screenshot(target_id: str | None = None) -> list[TextContent | ImageContent]:
-    """Capture a PNG, save a private local copy and return the image inline to the MCP client."""
+    """Capture a PNG with MCP Apps preview. Do not embed the expiring download URL as a second image."""
     result = _cdp("Page.captureScreenshot", {"format": "png"}, target_id)
     encoded = result.get("data")
     if not isinstance(encoded, str) or not encoded:
