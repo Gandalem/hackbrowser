@@ -434,6 +434,21 @@ def _workflow_execute(target_id: str, step: dict) -> dict:
 _workflows = WorkflowManager(_workflow_gate, _workflow_execute)
 
 
+def _manual_pause_result() -> dict | None:
+    """Return an explicit MCP result instead of an opaque transport exception."""
+    handoff = _manual_handoff.status()
+    if not handoff["active"]:
+        return None
+    return {
+        "ok": False,
+        "error_code": "manual_control_active",
+        "error": "User has manual browser control. Wait until control is returned.",
+        "target_id": handoff["target_id"],
+        "retry_safe": False,
+        "action_required": "browser_handoff_status",
+    }
+
+
 @mcp.tool()
 def browser_workflow_start(steps: list[dict], target_id: str) -> dict:
     """Run up to three of eight whitelisted browsing steps. Pause at challenges.
@@ -442,14 +457,18 @@ def browser_workflow_start(steps: list[dict], target_id: str) -> dict:
     Payments, state-changing submissions, credential entry and CAPTCHA solving
     are never run by workflows. Next batches need an explicit resume call.
     """
-    _manual_handoff.assert_ai_allowed()
+    paused = _manual_pause_result()
+    if paused is not None:
+        return paused
     return _workflows.start(steps, target_id)
 
 
 @mcp.tool()
 def browser_workflow_resume(workflow_id: str) -> dict:
     """After manual verification, resume next safe steps, never replaying clicks."""
-    _manual_handoff.assert_ai_allowed()
+    paused = _manual_pause_result()
+    if paused is not None:
+        return paused
     return _workflows.resume(workflow_id)
 
 
@@ -620,6 +639,9 @@ def browser_handoff_end(control_token: str) -> dict:
 @mcp.tool()
 def browser_navigate(url: str, target_id: str | None = None) -> dict:
     """Navigate a tab to an explicitly supplied HTTP(S) URL. Does not bypass security controls."""
+    paused = _manual_pause_result()
+    if paused is not None:
+        return paused
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("Only absolute HTTP(S) URLs are allowed")
@@ -742,6 +764,9 @@ def browser_act(snapshot_id: str, ref: str, action: str,
     90-second expiry and current-page verification. No payment, account
     change, arbitrary form submission or CAPTCHA automation.
     """
+    paused = _manual_pause_result()
+    if paused is not None:
+        return paused
     if (not isinstance(snapshot_id, str) or not 8 <= len(snapshot_id) <= 128
             or not isinstance(ref, str) or not 1 <= len(ref) <= 12):
         raise ValueError("Use a snapshot_id and ref returned by browser_observe")
@@ -769,6 +794,9 @@ def browser_act(snapshot_id: str, ref: str, action: str,
 @mcp.tool()
 def browser_click(selector: str, target_id: str | None = None) -> dict:
     """Click a CSS element with Playwright; report any new tab or navigation."""
+    paused = _manual_pause_result()
+    if paused is not None:
+        return paused
     if not isinstance(selector, str) or not 1 <= len(selector) <= 512:
         raise ValueError("selector must contain 1-512 characters")
     selected = _target(target_id)
@@ -781,6 +809,9 @@ def browser_click(selector: str, target_id: str | None = None) -> dict:
 @mcp.tool()
 def browser_fill(selector: str, value: str, target_id: str | None = None) -> dict:
     """Fill a field using real browser input events. Never log submitted values."""
+    paused = _manual_pause_result()
+    if paused is not None:
+        return paused
     if (not isinstance(selector, str) or not 1 <= len(selector) <= 512
             or not isinstance(value, str) or len(value) > 10_000):
         raise ValueError("Invalid selector or value too long")
@@ -796,6 +827,9 @@ def browser_click_text(text: str, role: str = "button", exact: bool = True,
 
     When multiple elements match, report ambiguity rather than guessing.
     """
+    paused = _manual_pause_result()
+    if paused is not None:
+        return paused
     if not isinstance(text, str) or not 1 <= len(text) <= 150:
         raise ValueError("text must contain 1-150 characters")
     if role not in {"button", "link", "tab", "text"}:
@@ -820,6 +854,9 @@ def browser_click_text(text: str, role: str = "button", exact: bool = True,
 def browser_fill_and_submit(selector: str, value: str, key: str = "Enter",
                             target_id: str | None = None) -> dict:
     """Fill a search field, then press Enter once and inspect the resulting page."""
+    paused = _manual_pause_result()
+    if paused is not None:
+        return paused
     if (not isinstance(selector, str) or not 1 <= len(selector) <= 512
             or not isinstance(value, str) or len(value) > 10_000):
         raise ValueError("Invalid selector or value too long")
@@ -840,6 +877,9 @@ def browser_fill_and_submit(selector: str, value: str, key: str = "Enter",
 @mcp.tool()
 def browser_click_at(x: int, y: int, target_id: str | None = None) -> dict:
     """Click exact GUI viewport coordinates once (not for automated CAPTCHA solving)."""
+    paused = _manual_pause_result()
+    if paused is not None:
+        return paused
     if any(type(v) is not int for v in (x, y)):
         raise ValueError("Coordinates must be integers")
     selected = _target(target_id)
@@ -871,6 +911,9 @@ _KEY_EVENTS = {
 @mcp.tool()
 def browser_keypress(key: str, target_id: str | None = None) -> dict:
     """Press one named key (Enter, Tab, Escape, arrows, PageUp/Down, etc.) in the active page."""
+    paused = _manual_pause_result()
+    if paused is not None:
+        return paused
     if key not in _KEY_EVENTS:
         raise ValueError("Unsupported key. Choose one of: " + ", ".join(_KEY_EVENTS))
     target = _target(target_id)
@@ -896,6 +939,9 @@ def browser_keypress(key: str, target_id: str | None = None) -> dict:
 def browser_scroll(direction: str = "down", pixels: int = 600,
                    selector: str | None = None, target_id: str | None = None) -> dict:
     """Scroll a page or selected scrollable container in a bounded direction."""
+    paused = _manual_pause_result()
+    if paused is not None:
+        return paused
     if direction not in {"up", "down", "left", "right"}:
         raise ValueError("direction must be up, down, left or right")
     if not isinstance(pixels, int) or not 1 <= pixels <= 1500:
