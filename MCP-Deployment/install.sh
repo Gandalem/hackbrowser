@@ -103,6 +103,8 @@ if ! id mcpstack >/dev/null 2>&1; then
   useradd --system --create-home --home-dir /var/lib/mcpstack --shell /usr/sbin/nologin mcpstack
 fi
 MCP_GROUP="$(id -gn mcpstack)"
+# Optional per-user browser profiles. Keep private to the service account.
+install -d -m 0700 -o mcpstack -g "$MCP_GROUP" "$ROOT/runtime/isolated-browser-profiles"
 chown root:"$MCP_GROUP" "$ROOT/runtime/secrets"
 chmod 0750 "$ROOT/runtime/secrets"
 
