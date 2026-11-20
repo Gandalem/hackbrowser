@@ -66,7 +66,17 @@ class IsolatedRoutingTests(unittest.TestCase):
         spec.loader.exec_module(module)
         item = {"target_id": "example-id", "url": "about:blank"}
         self.assertEqual(module.normalize_tabs([item]), [item])
+        self.assertEqual(module.normalize_tabs(item), [item])
+        self.assertEqual(module.normalize_tabs({"result": item}), [item])
         self.assertEqual(module.normalize_tabs({"result": [item]}), [item])
+        second = {"target_id": "another-id", "url": "about:blank"}
+        blocks = {"content": [
+            {"type": "text", "text": __import__("json").dumps(item)},
+            {"type": "text", "text": __import__("json").dumps(second)},
+        ]}
+        self.assertEqual(module.decode_tool_content(blocks), [item, second])
+        self.assertEqual(module.normalize_tabs(module.decode_tool_content(blocks)),
+                         [item, second])
         self.assertEqual(module.normalize_tabs({"result": {"result": [item]}}), [item])
         self.assertEqual(module.normalize_tabs({"result": []}), [])
         self.assertEqual(module.normalize_tabs([]), [])
