@@ -109,6 +109,58 @@ class ManualVerificationTests(unittest.TestCase):
                 server.browser_submit_verification("moved", "1234", 100, 100, 200, 200)
             cdp.assert_not_called()
 
+    def test_manual_image_click_does_not_choose_answer_or_retry(self):
+        server._verification_sessions["tile"] = {
+            "target_id": TARGET["id"], "url": URL,
+            "viewport": (1366, 900), "expires_at": server.time.monotonic() + 120,
+            "clicks": 0,
+        }
+        with mock.patch.object(server, "_target", return_value=TARGET), \
+             mock.patch.object(server, "_verification_state", return_value=STATE), \
+             mock.patch.object(server, "_cdp", return_value={}) as cdp:
+            result = server.browser_verification_click("tile", 110, 220)
+        self.assertTrue(result["clicked"])
+        self.assertEqual(result["verification_status"], "pending")
+        self.assertEqual(cdp.call_count, 2)
+        self.assertNotIn("answer", str(result))
+        self.assertEqual(server._verification_sessions["tile"]["clicks"], 1)
+
+    def test_manual_click_rejects_expired_oversize_and_changed_tab(self):
+        server._verification_sessions["tile"] = {
+            "target_id": TARGET["id"], "url": URL,
+            "viewport": (1366, 900), "expires_at": server.time.monotonic() + 120,
+            "clicks": 24,
+        }
+        with self.assertRaisesRegex(ValueError, "Maximum"):
+            server.browser_verification_click("tile", 110, 220)
+        with self.assertRaisesRegex(ValueError, "expired"):
+            server.browser_verification_click("tile", 110, 220)
+        for x,y in [(-1,10),(1,1000),(True,10)]:
+            with self.assertRaises(ValueError):
+                server.browser_verification_click("unknown",x,y)
+
+    def test_google_recaptcha_detected_without_reading_answer(self):
+        with mock.patch.object(server, "_evaluate", return_value={
+            "url": "https://www.google.com/recaptcha/api2/demo",
+            "text": "Sample Form with ReCAPTCHA",
+            "viewport": {"width": 1366, "height": 900},
+            "recaptcha_present": True,
+            "recaptcha_completed": False,
+        }):
+            pending = server._verification_state(TARGET["id"])
+        self.assertTrue(pending["verification_reason"])
+        self.assertFalse(pending["verification_completed"])
+        with mock.patch.object(server, "_evaluate", return_value={
+            "url": "https://www.google.com/recaptcha/api2/demo",
+            "text": "Sample Form with ReCAPTCHA",
+            "viewport": {"width": 1366, "height": 900},
+            "recaptcha_present": True,
+            "recaptcha_completed": True,
+        }):
+            done = server._verification_state(TARGET["id"])
+        self.assertTrue(done["verification_completed"])
+        self.assertIsNone(done["verification_reason"])
+
     def test_answer_validation(self):
         for answer in ("", " " * 2, "x" * 65, "abc\\n123"):
             with self.subTest(answer=answer), self.assertRaises(ValueError):
