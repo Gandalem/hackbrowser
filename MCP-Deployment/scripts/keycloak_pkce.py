@@ -11,7 +11,7 @@ import base64
 import hashlib
 import secrets
 from html.parser import HTMLParser
-from http.cookiejar import CookieJar
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urljoin, urlsplit, urlunsplit, urlencode
 from urllib.request import (
@@ -52,6 +52,16 @@ class _LoginForm(HTMLParser):
             self._inside = False
 
 
+def _loopback_cookie_jar():
+    # Keycloak can mark its auth-session cookies Secure even when the staging
+    # transport uses HTTP loopback (for example, with an HTTPS public hostname).
+    # This dedicated jar permits those cookies on HTTP; all requests below
+    # are validated to stay on 127.0.0.1, never across the public network.
+    return CookieJar(policy=DefaultCookiePolicy(
+        secure_protocols=("https", "wss", "http"),
+    ))
+
+
 def new_verifier():
     return secrets.token_urlsafe(48)
 
@@ -86,8 +96,16 @@ def authorization_code(
 
     Redirect callbacks are intercepted (nothing is sent to a public website).
     """
-    if not redirect_uri.startswith("http://127.0.0.1:"):
-        raise ValueError("PKCE smoke redirect URI must use loopback")
+    local = urlsplit(base_url)
+    callback = urlsplit(redirect_uri)
+    if (local.scheme != "http" or local.hostname != "127.0.0.1"
+            or not local.port or local.username is not None
+            or local.password is not None or local.query or local.fragment):
+        raise ValueError("PKCE smoke Keycloak URL must use HTTP loopback")
+    if (callback.scheme != "http" or callback.hostname != "127.0.0.1"
+            or not callback.port or callback.username is not None
+            or callback.password is not None or callback.fragment):
+        raise ValueError("PKCE smoke redirect URI must use HTTP loopback")
     verifier = new_verifier()
     state = secrets.token_urlsafe(24)
     query = urlencode({
@@ -101,7 +119,8 @@ def authorization_code(
         "nonce": secrets.token_urlsafe(24),
     })
     current = f"{base_url}/realms/{realm}/protocol/openid-connect/auth?{query}"
-    opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(CookieJar()),
+    opener = build_opener(ProxyHandler({}),
+                          HTTPCookieProcessor(_loopback_cookie_jar()),
                           _NoAutomaticRedirect())
     method = "GET"
     payload = None
@@ -147,7 +166,8 @@ def authorization_code(
             continue
 
         if code != 200:
-            raise PKCEFlowError(f"Keycloak authorization HTTP {code}")
+            stage = "login submission" if submitted else "authorization request"
+            raise PKCEFlowError(f"Keycloak {stage} HTTP {code}")
         if submitted:
             raise PKCEFlowError("Keycloak login did not redirect to callback")
         form = _LoginForm()
