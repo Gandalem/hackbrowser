@@ -238,6 +238,21 @@ def main():
                  LIVE / "runtime/venv-hackbrowser/bin/python"):
         if not path.exists():
             raise RuntimeError(f"Missing service interpreter: {path}")
+    # Preflight BEFORE creating temporary Keycloak identities: isolated
+    # gateway imports session_pool, which needs websocket-client even though
+    # the normal single-session gateway does not.
+    gateway_python = LIVE / "runtime/venv-gateway/bin/python"
+    gateway_module_check = subprocess.run(
+        [str(gateway_python), "-c", "import aiohttp, jwt, websocket"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=12,
+        check=False,
+    )
+    if gateway_module_check.returncode:
+        raise RuntimeError(
+            "Staging gateway Python dependencies missing; install "
+            "websocket-client>=1.8,<2 in runtime/venv-gateway "
+            "before running the PKCE integration test"
+        )
     chrome = next((path for name in ("google-chrome-stable", "chromium", "google-chrome")
                    if (path := shutil.which(name))), None)
     if not chrome:
@@ -446,18 +461,26 @@ def main():
             "HACKBROWSER_STAGING_TEST_CLIENT": client_id,
             "CHROMIUM_BIN": chrome,
         })
-        stage_process = subprocess.Popen(
-            [str(LIVE / "runtime/venv-gateway/bin/python"),
-             str(SOURCE / "services/gateway/oauth_gateway.py")],
-            cwd=stage_root, env=stage_env, user=account.pw_uid,
-            group=account.pw_gid, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        # The stage log lives under the disposable stage root and is
+        # destroyed during cleanup; never print its potentially sensitive body.
+        stage_log = stage_root / "runtime/gateway-staging.log"
+        with stage_log.open("wb") as stage_stderr:
+            stage_process = subprocess.Popen(
+                [str(LIVE / "runtime/venv-gateway/bin/python"),
+                 str(SOURCE / "services/gateway/oauth_gateway.py")],
+                cwd=stage_root, env=stage_env, user=account.pw_uid,
+                group=account.pw_gid, stdout=subprocess.DEVNULL,
+                stderr=stage_stderr, stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             if stage_process.poll() is not None:
-                raise RuntimeError("Staging OAuth gateway exited before health check")
+                raise RuntimeError(
+                    "Staging OAuth gateway exited before health check "
+                    f"(exit status {stage_process.returncode}); "
+                    "check gateway Python dependencies and startup configuration"
+                )
             try:
                 status, _ = request(
                     f"http://127.0.0.1:{gateway_port}/internal-health", timeout=2)
