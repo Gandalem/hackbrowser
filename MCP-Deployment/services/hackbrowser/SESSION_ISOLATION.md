@@ -121,6 +121,26 @@ routes, page/cookie isolation, PNG screenshots, foreign target/handoff token
 denial and third-user capacity refusal. The cleanup message reported only an
 attempt; independent cleanup audit remains pending.
 
+## OCI live idle/reconnect lifecycle smoke
+
+A separate non-destructive smoke test checks active request leases, idle browser
+and MCP bridge shutdown, and profile/cookie restoration in newly spawned
+processes. It uses an ephemeral loopback test page and isolated temporary
+browser profiles without modifying Keycloak or any production services:
+
+```bash
+cd ~/hb-isolation-test.nWOaei
+git pull --ff-only origin feat/isolated-browser-session-pool
+CHROMIUM_BIN="$(command -v google-chrome-stable || command -v chromium || command -v google-chrome)" \
+  /opt/mcp-deployment/runtime/venv-hackbrowser/bin/python \
+  MCP-Deployment/scripts/smoke_session_lifecycle.py
+```
+
+This test is not a real long-lived network SSE test: it verifies the backend
+lease mechanism, while a full streaming HTTP response, disconnect handling
+and reconnect across gateway restart need distinct live integration tests.
+It also does **not** validate ChatGPT's interactive OAuth PKCE redirect.
+
 ## Required end-to-end tests
 
 1. Two valid OAuth accounts have different CDP endpoints, tabs and screenshots.
