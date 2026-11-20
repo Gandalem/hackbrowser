@@ -123,7 +123,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
   http://127.0.0.1:8088/pocmap/mcp
 ```
 
-기대 결과: `/healthz`는 **200**, 인증 없는 `/pocmap/mcp`는 **401**, MCP 도구 검색은 PocMap 22 / HackBrowser 13 / ZAP 17개입니다. `check_calls.py`는 세 백엔드의 실제 호출과 HackBrowser PNG 이미지 블록을 확인합니다.
+기대 결과: `/healthz`는 **200**, 인증 없는 `/pocmap/mcp`는 **401**, MCP 도구 검색은 PocMap 22 / HackBrowser 16 / ZAP 17개입니다. `check_calls.py`는 세 백엔드의 실제 호출과 HackBrowser PNG 이미지 블록을 확인합니다.
 
 ## HackBrowser 스크린샷 미리보기 및 PNG 다운로드
 
@@ -138,6 +138,18 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 새 설치 시 `install.sh`가 `fonts-noto-cjk`·`fonts-nanum`·`fontconfig`를 설치하고 한국어 글꼴 인식을 검사합니다. 기존 서버는 **재설치하거나 계정을 초기화할 필요 없이** 다음 릴리스 배포 과정에서 `scripts/ensure_korean_fonts.sh`를 실행하고 `mcpstack-gui-chromium.service`를 재시작하도록 수정했습니다.
 
 서버에 직접 확인할 때는 `sudo bash /opt/mcp-deployment/scripts/ensure_korean_fonts.sh --check`를 실행합니다. `[PASS] GUI Chromium Korean fonts available`이면 운영 계정에서 한국어 폰트를 찾을 수 있다는 의미입니다. 이후 한국어가 포함된 웹페이지를 다시 캡처해 실제 렌더링을 확인하세요. 폰트가 잡혀도 웹사이트 자체의 CSS·문자 인코딩 문제는 별도로 점검해야 합니다.
+
+## Playwright GUI 조작 엔진
+
+Playwright는 **이미 실행 중인 GUI Chromium의 로컬 CDP 9223**에만 연결합니다. 새 브라우저/프로필을 생성하거나 로그인 쿠키를 초기화하지 않습니다. 기존 13개 도구는 유지하고, 아래 도구 3개가 추가되어 HackBrowser는 총 16개입니다.
+
+- `browser_click`: Playwright 실제 클릭, 동작 가능 여부 대기, URL/새 탭 감지
+- `browser_fill`: 실제 입력 이벤트와 입력 유지 여부 검사(비밀번호 및 본문 내용은 응답하지 않음)
+- `browser_click_text`: `text`, `role`(button/link/tab/text)로 클릭, 중복 매칭 거부
+- `browser_fill_and_submit`: 하나의 입력란을 채운 뒤 Enter 한 번 제출
+- `browser_click_at`: GUI 뷰포트 좌표를 한 번 클릭하는 보조 기능(자동 CAPTCHA 풀이 용도 아님)
+
+클릭 결과의 `effect_observed`는 URL·본문 변경 또는 새 탭 생성이 관찰되었는지만 뜻합니다. **false여도 클릭 실패라는 뜻은 아닙니다.** 비동기 로딩 이후에는 `browser_wait_for`로 확인하세요. `next_target_id`가 새 탭 ID이면 다음 단계에서는 그 탭을 지정하세요. 보안 확인 및 접근 제한 감지·수동 인증 흐름은 종전과 동일합니다. 기존 서버에 Python 의존성 변경이 있으면 태그 배포 과정에서 해당 venv에 설치하고, CDP/GUI 서비스 설정은 유지합니다.
 
 ## GUI Chromium 전용 모드
 
