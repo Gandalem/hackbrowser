@@ -2,7 +2,6 @@
 """Read-only protocol handshake and tool discovery via share gateway on loopback."""
 import json
 import os
-import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
