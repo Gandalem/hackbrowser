@@ -49,10 +49,10 @@ The **full MCP Deployment** installs three independent MCP backends and provides
 
 | MCP | Purpose | Tools |
 |---|---|---:|
-| **HackBrowser** | GUI Chromium, screenshots, human verification, workflows, Observe/Act | **22** |
+| **HackBrowser** | GUI Chromium, screenshots, human verification, workflows, Observe/Act and manual takeover | **26** |
 | PocMap | CVE/PoC intelligence | 22 |
 | OWASP ZAP | Web security testing | 17 |
-| **Total** | | **61** |
+| **Total** | | **65** |
 
 ```bash
 git clone https://github.com/Gandalem/hackbrowser.git
