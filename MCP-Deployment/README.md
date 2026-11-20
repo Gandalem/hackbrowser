@@ -135,9 +135,22 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 ## 스크린샷 한글 폰트 깨짐(□) 해결
 
-새 설치 시 `install.sh`가 `fonts-noto-cjk`·`fonts-nanum`·`fontconfig`를 설치하고 한국어 글꼴 인식을 검사합니다. 기존 서버는 **재설치하거나 계정을 초기화할 필요 없이** 다음 릴리스 배포 과정에서 `scripts/ensure_korean_fonts.sh`를 실행하고 `mcpstack-chromium.service`를 재시작하도록 수정했습니다.
+새 설치 시 `install.sh`가 `fonts-noto-cjk`·`fonts-nanum`·`fontconfig`를 설치하고 한국어 글꼴 인식을 검사합니다. 기존 서버는 **재설치하거나 계정을 초기화할 필요 없이** 다음 릴리스 배포 과정에서 `scripts/ensure_korean_fonts.sh`를 실행하고 `mcpstack-gui-chromium.service`를 재시작하도록 수정했습니다.
 
-서버에 직접 확인할 때는 `sudo bash /opt/mcp-deployment/scripts/ensure_korean_fonts.sh --check`를 실행합니다. `[PASS] Headless Chromium Korean fonts available`이면 운영 계정에서 한국어 폰트를 찾을 수 있다는 의미입니다. 이후 한국어가 포함된 웹페이지를 다시 캡처해 실제 렌더링을 확인하세요. 폰트가 잡혀도 웹사이트 자체의 CSS·문자 인코딩 문제는 별도로 점검해야 합니다.
+서버에 직접 확인할 때는 `sudo bash /opt/mcp-deployment/scripts/ensure_korean_fonts.sh --check`를 실행합니다. `[PASS] GUI Chromium Korean fonts available`이면 운영 계정에서 한국어 폰트를 찾을 수 있다는 의미입니다. 이후 한국어가 포함된 웹페이지를 다시 캡처해 실제 렌더링을 확인하세요. 폰트가 잡혀도 웹사이트 자체의 CSS·문자 인코딩 문제는 별도로 점검해야 합니다.
+
+## GUI Chromium 전용 모드
+
+HackBrowser MCP는 GUI Chromium의 로컬 CDP `127.0.0.1:9223`만 사용합니다. 기존 Headless Chromium 서비스 `mcpstack-chromium.service`는 설치·업데이트 시 비활성화하고 마스킹하며, `9222`에 자동 재연결하지 않습니다. GUI는 Xvfb 가상 디스플레이에서 실행되므로 서버에 모니터가 없어도 실제 GUI 브라우저를 구동합니다. VNC 등 화면 뷰어는 필요할 때만 별도 연결하며 CDP를 외부로 노출하지 않습니다.
+
+기존 서버의 GUI 전환 명령:
+
+```bash
+sudo bash /opt/mcp-deployment/scripts/configure_gui_chromium.sh
+sudo bash /opt/mcp-deployment/status.sh
+```
+
+이전에 수동으로 시작한 GUI Chromium(`9223`)이 있으면 그 세션이 살아 있는 동안 재사용하고, 종료되면 관리 서비스가 새 GUI를 실행합니다. 브라우저 프로필은 자동으로 병합하지 않습니다. **새 GUI는 별도 프로필**을 사용하므로 기존 로그인 쿠키는 필요시 다시 로그인해야 합니다. 상태 점검은 Headless 잔존 포트 `9222`를 오류로 처리합니다.
 
 ## 자동화 접근 제한 대응
 
@@ -163,4 +176,4 @@ sudo bash /opt/mcp-deployment/renew-share.sh 7   # 공유 토큰 교체(기존 U
 sudo bash /opt/mcp-deployment/uninstall.sh        # 서비스 중지, 설정/DB 보존
 ```
 
-`private.env`, ZAP 키, 공유 URL을 Git에 올리지 마세요. **8081(Keycloak), 8282(ZAP), 9222(CDP)는 외부에 공개하면 안 됩니다.** 사용자 계정이 여러 개라도 HackBrowser 브라우저 세션과 ZAP 스캔 환경은 공유됩니다. 능동 진단은 승인된 대상에서만 수행하세요.
+`private.env`, ZAP 키, 공유 URL을 Git에 올리지 마세요. **8081(Keycloak), 8282(ZAP), 9223(GUI CDP)는 외부에 공개하면 안 됩니다.** 사용자 계정이 여러 개라도 HackBrowser 브라우저 세션과 ZAP 스캔 환경은 공유됩니다. 능동 진단은 승인된 대상에서만 수행하세요.

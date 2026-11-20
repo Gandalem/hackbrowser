@@ -51,6 +51,7 @@ rollback() {
   if [[ -f "$BACKUP/runtime/caddy/Caddyfile" ]]; then
     cp -p "$BACKUP/runtime/caddy/Caddyfile" "$ROOT/runtime/caddy/Caddyfile"
   fi
+  bash "$ROOT/scripts/configure_gui_chromium.sh" || true
   systemctl restart mcpstack-hackbrowser.service mcpstack-share.service || true
   if systemctl is-enabled --quiet mcpstack-oauth.service; then
     systemctl restart mcpstack-oauth.service || true
@@ -81,7 +82,7 @@ cp "$SOURCE/install.sh" "$ROOT/install.sh"
   MCP_INSTALL_ROOT="$ROOT" python3 "$ROOT/scripts/render_config.py"
 )
 docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile
-chmod 0755 "$ROOT/services/hackbrowser/start_chromium_headless.sh"
+chmod 0755 "$ROOT/services/hackbrowser/start_chromium_gui.sh"
 # Upgrade already-running VMs without reinstalling or resetting MCP credentials.
 # Install/check Hangul fonts before restarting the renderer so Chrome sees them.
 bash "$ROOT/scripts/ensure_korean_fonts.sh"
@@ -89,7 +90,8 @@ bash "$ROOT/scripts/ensure_korean_fonts.sh"
 # Exercise actual module initialization: Python compilation alone does not
 # validate extension registration or the ui:// resource on the target SDK.
 "$ROOT/runtime/venv-hackbrowser/bin/python" -c "import runpy; runpy.run_path('$ROOT/services/hackbrowser/server.py', run_name='screenshot_ui_preflight')"
-systemctl restart mcpstack-chromium.service mcpstack-hackbrowser.service mcpstack-share.service
+bash "$ROOT/scripts/configure_gui_chromium.sh"
+systemctl restart mcpstack-share.service
 docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" up -d zap caddy
 # "up -d" alone does not reload a modified bind-mounted Caddyfile.
 docker compose --env-file "$ROOT/runtime/private.env" -f "$ROOT/docker-compose.yml" exec -T caddy caddy reload --config /etc/caddy/Caddyfile
