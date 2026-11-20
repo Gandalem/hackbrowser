@@ -78,8 +78,8 @@ class SourceTests(unittest.TestCase):
                     and d.func.value.id == "mcp" and d.func.attr == "tool"
                     for d in node.decorator_list)
         ]
-        # Screenshot is provided through the MCP Apps extension, while the
-        # other seven actions remain ordinary MCP tools.
+        # All 8 browser actions must remain ordinary MCP tools, even if a
+        # separate Apps extension serves their ui:// screenshot template.
         app_exported = [
             node.name for node in tree.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -88,9 +88,9 @@ class SourceTests(unittest.TestCase):
                     and d.func.value.id == "apps" and d.func.attr == "tool"
                     for d in node.decorator_list)
         ]
-        self.assertEqual(len(exported), 7)
-        self.assertEqual(app_exported, ["browser_screenshot"])
-        self.assertEqual(len(exported) + len(app_exported), 8)
+        self.assertEqual(len(exported), 8)
+        self.assertIn("browser_screenshot", exported)
+        self.assertEqual(app_exported, [])
 
     def test_caddy_modes(self):
         for mode, public, oauth, site in (
