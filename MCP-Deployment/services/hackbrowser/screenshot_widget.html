@@ -91,6 +91,7 @@
     let autoResumeOnConfirmed = false;
     let hostInitialized = false;
     let hostSupportsDownload = null;
+    let hostToolPrefix = "";
     let nextRequestId = 2;
     const pendingRequests = new Map();
     let lastReportedHeight = 0;
@@ -209,19 +210,62 @@
       scheduleHeightReport();
     }
 
-    // Host tool calls are user-triggered. Refreshing the screenshot never
-    // submits a challenge answer or attempts to solve it.
+    // ChatGPT connectors may prefix tool names with a connector namespace.
+    // The opening tool's real name is provided by the MCP Apps handshake.
+    function setHostToolPrefix(hostContext) {
+      const openingName = hostContext?.toolInfo?.tool?.name;
+      const suffix = "browser_screenshot";
+      if (typeof openingName === "string" && openingName.endsWith(suffix)) {
+        hostToolPrefix = openingName.slice(0, -suffix.length);
+      }
+    }
+
+    function toolFailure(result) {
+      if (result?.isError || result?.error) {
+        const text = result?.content?.find((part) => part?.type === "text")?.text;
+        return text || String(result.error?.message || "MCP 도구 실행 실패");
+      }
+      const raw = result?.content?.find((part) => part?.type === "text")?.text;
+      if (typeof raw === "string" && raw.length < 2000) {
+        try {
+          const obj = JSON.parse(raw);
+          if (obj?.detail && /MCP Resource not found/i.test(String(obj.detail))) return obj.detail;
+        } catch (_) {}
+      }
+      return null;
+    }
+
+    function friendlyToolError(error) {
+      const message = String(error?.message ?? error ?? "");
+      if (/MCP Resource not found|Unknown tool|Tool not found|not registered/i.test(message)) {
+        return new Error(
+          "ChatGPT의 HackBrowser 도구 목록이 이전 버전입니다. " +
+          "ChatGPT 설정에서 HackBrowser 연결을 새로고침하거나 다시 연결하고, " +
+          "새 채팅에서 HackBrowser를 선택해 새 캡처를 실행하세요."
+        );
+      }
+      return error instanceof Error ? error : new Error(message || "MCP 도구 호출 실패");
+    }
+
+    // Each user click makes at most ONE tool call. Do not blindly retry a
+    // verification submission: a response loss must not submit it twice.
     async function callMcpTool(name, args) {
-      if (hostInitialized) {
-        try { return await hostRequest("tools/call", { name, arguments: args }); }
-        catch (error) {
-          if (typeof window.openai?.callTool !== "function") throw error;
+      const toolName = hostToolPrefix + name;
+      try {
+        let result;
+        if (hostInitialized) {
+          result = await hostRequest("tools/call", { name: toolName, arguments: args });
+        } else if (typeof window.openai?.callTool === "function") {
+          result = await window.openai.callTool(toolName, args);
+        } else {
+          throw new Error("이 채팅 환경에서는 MCP 도구 호출을 지원하지 않습니다.");
         }
+        const failure = toolFailure(result);
+        if (failure) throw new Error(failure);
+        return result;
+      } catch (error) {
+        throw friendlyToolError(error);
       }
-      if (typeof window.openai?.callTool === "function") {
-        return await window.openai.callTool(name, args);
-      }
-      throw new Error("이 채팅 환경에서는 MCP 도구 호출을 지원하지 않습니다.");
     }
 
     async function refreshCapture() {
@@ -360,9 +404,14 @@
         autoResumeOnConfirmed = true;
         await refreshCapture();
       } catch (error) {
-        verificationAnswer.value = "";
+        // An error may have happened before routing or after a successful
+        // one-time delivery. Preserve the visible answer for reference but
+        // prevent accidental duplicate submission until a fresh capture.
         activeVerification = null;
-        verificationStatus.textContent = error?.message || "제출에 실패했습니다.";
+        verificationSubmit.disabled = true;
+        verificationStatus.textContent =
+          (error?.message || "제출에 실패했습니다.") +
+          " 중복 제출하지 말고 연결 상태를 확인한 뒤 새 캡처를 실행하세요.";
       } finally {
         verificationSubmitting = false;
         picking = null;
@@ -471,6 +520,7 @@
           ? true
           : (message.result.hostCapabilities ? false : null);
         applyHostHeightLimit(message.result.hostContext?.containerDimensions);
+        setHostToolPrefix(message.result.hostContext);
         hostInitialized = true;
         window.parent.postMessage({ jsonrpc: "2.0", method: "ui/notifications/initialized" }, "*");
         scheduleHeightReport();
@@ -479,6 +529,7 @@
       if (message.method === "ui/notifications/tool-result") renderScreenshot(message.params);
       if (message.method === "ui/notifications/host-context-changed") {
         applyHostHeightLimit(message.params?.containerDimensions);
+        setHostToolPrefix(message.params);
         scheduleHeightReport();
       }
     });
