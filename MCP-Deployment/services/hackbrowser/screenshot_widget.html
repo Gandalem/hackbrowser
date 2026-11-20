@@ -19,6 +19,16 @@
     button:disabled { cursor: not-allowed; opacity: .45; }
     #status { margin: 0; color: inherit; opacity: .78; overflow-wrap: anywhere; }
     #details { margin-left: auto; font-variant-numeric: tabular-nums; opacity: .7; }
+    #verification-card { margin-top: 12px; padding: 12px; border: 1px solid #8886;
+      border-radius: 8px; }
+    #verification-card h2 { font-size: 15px; margin: 0 0 7px; }
+    #verification-card p { margin: 7px 0; }
+    #verification-answer { box-sizing: border-box; width: 100%; max-width: 320px;
+      padding: 9px; border: 1px solid #8889; border-radius: 6px; font: inherit; }
+    #verification-positions { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+    #verification-submit { margin-top: 8px; font-weight: 650; }
+    .verification-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .verification-active { cursor: crosshair; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -30,6 +40,21 @@
       <button id="download" type="button" disabled>PNG 다운로드</button>
       <span id="details"></span>
     </div>
+    <section id="verification-card" hidden aria-label="사용자 인증 입력">
+      <h2>사용자 인증이 필요합니다</h2>
+      <p>이미지의 CAPTCHA를 직접 읽고 아래에 답을 입력하세요. 화면에서 <strong>답 입력칸</strong>과
+        <strong>확인 버튼</strong> 위치를 순서대로 클릭해 지정한 후 제출할 수 있습니다.</p>
+      <label for="verification-answer">인증 답변</label>
+      <input id="verification-answer" type="text" maxlength="64" autocomplete="off"
+        autocapitalize="off" spellcheck="false" placeholder="화면에 표시된 답을 입력" />
+      <div class="verification-controls">
+        <button type="button" id="pick-input">① 답 입력칸 위치 선택</button>
+        <button type="button" id="pick-confirm">② 확인 버튼 위치 선택</button>
+      </div>
+      <p id="verification-positions" role="status">입력칸: 미선택 / 확인 버튼: 미선택</p>
+      <button id="verification-submit" type="button" disabled>인증 답변 제출</button>
+      <p id="verification-status" role="status" aria-live="polite"></p>
+    </section>
   </main>
   <script>
     "use strict";
@@ -40,6 +65,18 @@
     const status = document.getElementById("status");
     const download = document.getElementById("download");
     const details = document.getElementById("details");
+    const verificationCard = document.getElementById("verification-card");
+    const verificationAnswer = document.getElementById("verification-answer");
+    const verificationPositions = document.getElementById("verification-positions");
+    const verificationStatus = document.getElementById("verification-status");
+    const verificationSubmit = document.getElementById("verification-submit");
+    const pickInput = document.getElementById("pick-input");
+    const pickConfirm = document.getElementById("pick-confirm");
+    let activeVerification = null;
+    let inputPoint = null;
+    let confirmPoint = null;
+    let picking = null;
+    let verificationSubmitting = false;
     let hostInitialized = false;
     let hostSupportsDownload = null;
     let nextRequestId = 2;
@@ -94,6 +131,36 @@
       return [];
     }
 
+    function updateVerificationControls() {
+      if (!verificationSubmit) return;
+      verificationSubmit.disabled = !activeVerification || !verificationAnswer.value.trim() ||
+        !inputPoint || !confirmPoint || verificationSubmitting;
+      verificationPositions.textContent =
+        "입력칸: " + (inputPoint ? inputPoint.x + ", " + inputPoint.y : "미선택") +
+        " / 확인 버튼: " + (confirmPoint ? confirmPoint.x + ", " + confirmPoint.y : "미선택");
+    }
+
+    function setupVerification(metadata) {
+      const value = metadata?.verification;
+      if (!value?.required || typeof value.id !== "string" ||
+          !Number.isInteger(value.viewport?.width) ||
+          !Number.isInteger(value.viewport?.height)) {
+        activeVerification = null;
+        verificationCard.hidden = true;
+        preview.classList.remove("verification-active");
+        return;
+      }
+      activeVerification = value;
+      verificationAnswer.value = "";
+      inputPoint = null;
+      confirmPoint = null;
+      verificationSubmitting = false;
+      picking = null;
+      verificationStatus.textContent = "인증 답변은 직접 입력해야 하며, 자동으로 풀지 않습니다.";
+      verificationCard.hidden = false;
+      updateVerificationControls();
+    }
+
     function renderScreenshot(payload) {
       const blocks = captureContent(payload);
       const block = blocks.find((item) =>
@@ -114,10 +181,105 @@
       preview.style.display = "block";
       status.textContent = "HackBrowser 스크린샷";
       download.disabled = false;
+      setupVerification(metadata);
       scheduleHeightReport();
     }
 
     preview.addEventListener("load", scheduleHeightReport);
+    pickInput.addEventListener("click", () => {
+      if (!activeVerification) return;
+      picking = "input";
+      preview.classList.add("verification-active");
+      verificationStatus.textContent = "스크린샷에서 답을 입력할 위치를 클릭하세요.";
+    });
+    pickConfirm.addEventListener("click", () => {
+      if (!activeVerification) return;
+      picking = "confirm";
+      preview.classList.add("verification-active");
+      verificationStatus.textContent = "스크린샷에서 인증 확인 버튼 위치를 클릭하세요.";
+    });
+    preview.addEventListener("click", (event) => {
+      if (!picking || !activeVerification) return;
+      const rect = preview.getBoundingClientRect();
+      const scale = Math.min(
+        rect.width / activeVerification.viewport.width,
+        rect.height / activeVerification.viewport.height
+      );
+      if (!(scale > 0)) return;
+      const displayedWidth = activeVerification.viewport.width * scale;
+      const displayedHeight = activeVerification.viewport.height * scale;
+      const offsetX = (rect.width - displayedWidth) / 2;
+      const offsetY = (rect.height - displayedHeight) / 2;
+      const x = Math.floor((event.clientX - rect.left - offsetX) / scale);
+      const y = Math.floor((event.clientY - rect.top - offsetY) / scale);
+      if (x < 0 || y < 0 || x >= activeVerification.viewport.width ||
+          y >= activeVerification.viewport.height) {
+        verificationStatus.textContent = "이미지 내부의 위치를 클릭하세요.";
+        return;
+      }
+      if (picking === "input") inputPoint = { x, y };
+      else confirmPoint = { x, y };
+      picking = null;
+      preview.classList.remove("verification-active");
+      verificationStatus.textContent = "위치가 지정됐습니다.";
+      updateVerificationControls();
+    });
+    verificationAnswer.addEventListener("input", updateVerificationControls);
+    verificationSubmit.addEventListener("click", async () => {
+      if (verificationSubmit.disabled || verificationSubmitting ||
+          !activeVerification || !inputPoint || !confirmPoint) return;
+      const answer = verificationAnswer.value.trim();
+      if (!answer || answer.length > 64 || /[\\x00-\\x1F\\x7F]/.test(answer)) {
+        verificationStatus.textContent = "유효한 한 줄 답변을 입력하세요.";
+        return;
+      }
+      verificationSubmitting = true;
+      updateVerificationControls();
+      verificationStatus.textContent = "OCI 브라우저에 인증 답변을 전달하고 있습니다...";
+      const args = {
+        verification_id: activeVerification.id,
+        answer,
+        input_x: inputPoint.x, input_y: inputPoint.y,
+        confirm_x: confirmPoint.x, confirm_y: confirmPoint.y,
+      };
+      // The answer is sent only after an explicit click, never by an effect.
+      try {
+        let result;
+        if (hostInitialized) {
+          try {
+            result = await hostRequest("tools/call", {
+              name: "browser_submit_verification", arguments: args,
+            });
+          } catch (err) {
+            if (typeof window.openai?.callTool !== "function") throw err;
+            result = await window.openai.callTool("browser_submit_verification", args);
+          }
+        } else if (typeof window.openai?.callTool === "function") {
+          result = await window.openai.callTool("browser_submit_verification", args);
+        } else {
+          throw new Error("이 채팅 환경에서는 MCP 도구 직접 호출을 지원하지 않습니다.");
+        }
+        if (result?.isError || result?.error) {
+          throw new Error("브라우저가 제출을 거부했습니다. 새 캡처를 진행하세요.");
+        }
+        // Consume the card once. The normal page inspection determines
+        // whether the human answer was accepted by the target website.
+        verificationAnswer.value = "";
+        activeVerification = null;
+        verificationStatus.textContent =
+          "답변을 한 번 제출했습니다. 잠시 후 ChatGPT에서 페이지 상태를 다시 확인하세요.";
+      } catch (error) {
+        verificationAnswer.value = "";
+        activeVerification = null;
+        verificationStatus.textContent = error?.message || "제출에 실패했습니다.";
+      } finally {
+        verificationSubmitting = false;
+        picking = null;
+        preview.classList.remove("verification-active");
+        updateVerificationControls();
+        scheduleHeightReport();
+      }
+    });
     preview.addEventListener("error", () => {
       status.textContent = "이 호스트가 인라인 PNG 표시를 제한했습니다. 다운로드 기능을 이용하세요.";
       preview.style.display = "none";
