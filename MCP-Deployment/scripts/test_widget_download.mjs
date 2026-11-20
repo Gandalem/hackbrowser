@@ -36,9 +36,15 @@ const parent = {
   postMessage(message) {
     sent.push(message);
     if (message.method === "tools/call") {
+      const name = message.params.name;
+      const payload = name.endsWith("browser_handoff_begin")
+        ? {active:true, control_token:"test-capability-value", target_id:"gui-tab"}
+        : name.endsWith("browser_handoff_end")
+          ? {ok:true, returned_to_ai:true}
+          : {ok:true};
       context.window.onMessage({
         source: parent, data: { jsonrpc: "2.0", id: message.id,
-          result: { content: [{ type: "text", text: '{"ok":true}' }] } },
+          result: { content: [{ type: "text", text: JSON.stringify(payload) }] } },
       });
     }
     if (message.method === "ui/download-file") {
@@ -91,7 +97,7 @@ window.onMessage({
     jsonrpc: "2.0",
     method: "ui/notifications/tool-result",
     params: { content: [
-      { type: "text", text: JSON.stringify({ bytes: png.length, mime_type: "image/png" }) },
+      { type: "text", text: JSON.stringify({ bytes: png.length, mime_type: "image/png", target_id: "gui-tab" }) },
       { type: "image", mimeType: "image/png", data: png.toString("base64") },
     ] },
   },
@@ -106,6 +112,24 @@ assert.equal(request.params.contents[0].resource.mimeType, "image/png");
 assert.equal(request.params.contents[0].resource.blob, png.toString("base64"));
 assert.equal(elements.get("download").disabled, false);
 assert.match(elements.get("status").textContent, /요청을 전달했습니다/);
+
+// A user explicitly takes over the GUI, sends one click, and returns control.
+assert.equal(elements.get("handoff-take").disabled, false);
+await elements.get("handoff-take").click();
+assert.equal(elements.get("handoff-return").hidden, false);
+assert.ok(sent.some(message => message.method === "tools/call" &&
+  message.params.name === "hackbrowser__browser_handoff_begin"));
+await elements.get("preview").click({clientX: 100, clientY: 100});
+const handoffClick = sent.find(message => message.method === "tools/call" &&
+  message.params.name === "hackbrowser__browser_handoff_input");
+assert.ok(handoffClick, "manual click tool not invoked");
+assert.equal(handoffClick.params.arguments.target_id, "gui-tab");
+assert.equal(handoffClick.params.arguments.action, "click");
+assert.equal(handoffClick.params.arguments.control_token, "test-capability-value");
+await elements.get("handoff-return").click();
+assert.equal(elements.get("handoff-return").hidden, true);
+assert.ok(sent.some(message => message.method === "tools/call" &&
+  message.params.name === "hackbrowser__browser_handoff_end"));
 
 // A human reads the picture, chooses two positions, and explicitly submits.
 window.onMessage({
