@@ -57,8 +57,10 @@ restore existing behavior without deleting isolated user profile directories.
 
 ## Limitations and verification needed
 
-- This code has **not yet passed an OCI two-user live test**; do not consider
-  it production multi-tenant isolation until that test succeeds.
+- The OCI ARM64 synthetic-user smoke and two real Keycloak JWT staging-account
+  routing test both passed. This does not prove hardened multi-tenant isolation;
+  interactive ChatGPT authorization-code/PKCE, idle cleanup, and hostile local
+  process isolation still require separate checks.
 - Isolated processes share the same Unix uid; for untrusted third parties use
   container/user-namespace boundaries and enforce per-process memory quotas.
 - No native per-process memory quota is implemented; `MAX_SESSIONS=2` bounds
@@ -99,6 +101,25 @@ Cleanup is attempted on both success and failure. Abrupt machine termination
 or SIGKILL can interrupt cleanup; if that happens, review/delete **only**
 Keycloak entities whose names begin with the generated `hb-smoke-` prefix.
 The test never deliberately alters existing Keycloak users or clients.
+
+After any test run, verify cleanup with a **read-only** Keycloak audit:
+
+```bash
+sudo /usr/bin/python3 MCP-Deployment/scripts/smoke_oauth_isolation.py --verify-cleanup
+sudo ss -lntp | grep -E ':(8787|9223|8765|932[0-9]|952[0-9])\\b'
+```
+
+The audit lists only the count of remaining disposable `hb-smoke-*` users and
+clients. The port check confirms production listeners and looks for stale test
+CDP/MCP processes. No deletion or process termination is performed by either
+command. If leftovers are reported, investigate before merging or running the
+next staged test.
+
+On 2026-11-21 the user-provided OCI output reported **PASS** for real Keycloak
+JWT issuance, invalid/missing JWT denial, two account-specific browser/CDP
+routes, page/cookie isolation, PNG screenshots, foreign target/handoff token
+denial and third-user capacity refusal. The cleanup message reported only an
+attempt; independent cleanup audit remains pending.
 
 ## Required end-to-end tests
 
