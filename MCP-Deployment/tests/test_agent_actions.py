@@ -132,15 +132,18 @@ class AgentActionsTests(unittest.TestCase):
         self.assertIn("CSS.escape", evaluate.call_args.args[0])
         self.assertNotIn("el.value", evaluate.call_args.args[0])
 
-    def test_click_refuses_hidden_and_disabled_elements(self):
+    def test_click_reports_playwright_result_and_keeps_rate_limits(self):
         with mock.patch.object(server, "_target", return_value=TARGET), \
-             mock.patch.object(server, "_pace_navigation"), \
-             mock.patch.object(server, "_evaluate", return_value={"ok": False, "error": "Element is disabled"}) as evaluate:
+             mock.patch.object(server, "_pace_navigation") as pace, \
+             mock.patch.object(server, "_gui_action", return_value={
+                 "ok": True, "effect_observed": False
+             }) as action:
             result = server.browser_click("button:disabled")
-        self.assertFalse(result["ok"])
-        expression = evaluate.call_args.args[0]
-        self.assertIn("if(el.disabled)", expression)
-        self.assertIn("Element is not visible", expression)
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["effect_observed"])
+        pace.assert_called_once()
+        action.assert_called_once_with(TARGET, "click", {"selector": "button:disabled"})
+
 
 
 if __name__ == "__main__":
