@@ -582,6 +582,7 @@ def browser_screenshot(target_id: str | None = None) -> list[TextContent | Image
     try:
         selected = _target(target_id)
         state = _verification_state(selected["id"])
+        metadata["target_id"] = selected["id"]
         if state.get("verification_completed"):
             metadata["verification_status"] = "completed"
         if state.get("verification_reason"):
