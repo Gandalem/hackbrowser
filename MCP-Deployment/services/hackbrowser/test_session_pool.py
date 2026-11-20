@@ -8,6 +8,7 @@ from session_pool import SessionPool
 class FakeProcess:
     def __init__(self):
         self.exited = False
+        self.pid = 999999
 
     def poll(self):
         return 0 if self.exited else None
@@ -16,6 +17,7 @@ class FakeProcess:
         self.exited = True
 
     def wait(self, timeout=None):
+        self.exited = True
         return 0
 
     def kill(self):
@@ -35,7 +37,8 @@ class PoolTests(unittest.TestCase):
             pool = SessionPool(root, max_sessions=2)
             with patch("session_pool.subprocess.Popen", side_effect=lambda *args, **kwargs: FakeProcess()), \
                  patch.object(pool, "_ready", return_value=True), \
-                 patch.object(pool, "_port_available", return_value=True):
+                 patch.object(pool, "_port_available", return_value=True), \
+                 patch("session_pool.os.killpg"):
                 a = pool.acquire("alice")
                 b = pool.acquire("bob")
                 self.assertNotEqual(a.port, b.port)
@@ -56,7 +59,8 @@ class PoolTests(unittest.TestCase):
             proc = FakeProcess()
             with patch("session_pool.subprocess.Popen", return_value=proc), \
                  patch.object(pool, "_ready", return_value=False), \
-                 patch.object(pool, "_port_available", return_value=True):
+                 patch.object(pool, "_port_available", return_value=True), \
+                 patch("session_pool.os.killpg"):
                 with self.assertRaisesRegex(RuntimeError, "did not become ready"):
                     pool.acquire("alice", startup_timeout=0)
             self.assertTrue(proc.exited)
