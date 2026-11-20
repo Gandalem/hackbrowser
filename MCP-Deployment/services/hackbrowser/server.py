@@ -9,6 +9,7 @@ import base64
 import binascii
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -26,6 +27,14 @@ CDP_ROOT = f"http://{CDP_HOST}:{CDP_PORT}"
 MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 SCREENSHOT_UI_URI = "ui://hackbrowser/screenshot.html"
+# A modest per-site navigation gap prevents accidental bursts. It does not
+# spoof browser identity or circumvent a site's access control.
+MIN_NAVIGATION_INTERVAL_SECONDS = 4.0
+# If a site explicitly denies automated access, do not repeatedly hammer it.
+ACCESS_COOLDOWN_SECONDS = 30 * 60
+_access_lock = threading.Lock()
+_next_navigation_at: dict[str, float] = {}
+_restricted_until: dict[str, float] = {}
 
 apps = Apps()
 apps.add_html_resource(
@@ -128,6 +137,76 @@ def _evaluate(expression: str, target_id: str | None = None):
     return remote.get("description", "")
 
 
+def _restriction_reason(url: str, text: str) -> str | None:
+    """Classify explicit access-denial pages, not ordinary empty or slow pages."""
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    if host.endswith(".naver.com") and (
+        "쇼핑 서비스 접속이 일시적으로 제한되었습니다." in text
+        or "검색 서비스 이용이 제한되었습니다." in text
+    ):
+        return "네이버의 접속 제한 안내가 표시됨"
+    if (host == "google.com" or host.endswith(".google.com")) and (
+        parsed.path.startswith("/sorry/")
+        or "Our systems have detected unusual traffic from your computer network" in text
+    ):
+        return "Google에서 비정상 트래픽 확인을 요구함"
+    if (host == "gmarket.co.kr" or host.endswith(".gmarket.co.kr")) and (
+        "봇 확인 절차가 진행되고 있습니다" in text
+    ):
+        return "G마켓에서 방문자 확인을 요구함"
+    return None
+
+
+def _site_key(host: str) -> str:
+    """Treat Naver Shopping's home and search subdomains as one rate-limit scope."""
+    if host == "shopping.naver.com" or host.endswith(".shopping.naver.com"):
+        return "shopping.naver.com"
+    return host
+
+
+def _record_restriction(url: str) -> int:
+    host = urlsplit(url).hostname
+    if not host:
+        return 0
+    key = _site_key(host)
+    with _access_lock:
+        now = time.monotonic()
+        previous = _restricted_until.get(key, 0.0)
+        if previous > now:
+            # Reading the same blocked page should not reset the cooldown.
+            return int(previous - now) + 1
+        _restricted_until[key] = now + ACCESS_COOLDOWN_SECONDS
+    return ACCESS_COOLDOWN_SECONDS
+
+
+def _pace_navigation(host: str) -> None:
+    """Reserve a non-burst navigation slot; never retry a denied origin."""
+    key = _site_key(host)
+    with _access_lock:
+        now = time.monotonic()
+        remaining = _restricted_until.get(key, 0.0) - now
+        if remaining > 0:
+            raise RuntimeError(
+                f"{host}: 접속 제한이 확인되어 재요청을 중단했습니다 "
+                f"(남은 대기 {int(remaining) + 1}초). 차단 우회 대신 사이트의 "
+                "공식 확인·고객센터 절차를 이용하세요."
+            )
+        delay = max(0.0, _next_navigation_at.get(key, now) - now)
+        _next_navigation_at[key] = now + delay + MIN_NAVIGATION_INTERVAL_SECONDS
+    if delay:
+        time.sleep(delay)
+    # A concurrent tool call may have detected a restriction while we waited.
+    with _access_lock:
+        remaining = _restricted_until.get(key, 0.0) - time.monotonic()
+        if remaining > 0:
+            raise RuntimeError(
+                f"{host}: 접속 제한을 확인해 페이지 이동을 중단했습니다 "
+                f"(남은 대기 {int(remaining) + 1}초)."
+            )
+
+
+
 @mcp.tool()
 def browser_status() -> dict:
     """Check whether HackBrowser exposes a local Chrome DevTools Protocol endpoint."""
@@ -154,6 +233,7 @@ def browser_navigate(url: str, target_id: str | None = None) -> dict:
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("Only absolute HTTP(S) URLs are allowed")
     selected = _target(target_id)
+    _pace_navigation(parsed.hostname.lower())
     result = _cdp("Page.navigate", {"url": url}, selected["id"])
     if result.get("errorText"):
         raise RuntimeError(result["errorText"])
@@ -164,13 +244,29 @@ def browser_navigate(url: str, target_id: str | None = None) -> dict:
 def browser_page_text(target_id: str | None = None, max_chars: int = 12000) -> dict:
     """Read visible page text and title (up to 30,000 characters) from an open tab."""
     max_chars = max(1, min(max_chars, 30_000))
+    # Inspect enough text to recognize a site restriction, even if the
+    # caller requested only a very short visible-text preview.
+    probe_chars = max(max_chars, 2000)
     expression = """(function () { return {
       url: location.href,
       title: document.title,
       text: (document.body ? document.body.innerText : '').slice(0, %d)
-    }; })()""" % max_chars
+    }; })()""" % probe_chars
     value = _evaluate(expression, target_id)
-    return value if isinstance(value, dict) else {"result": value}
+    if not isinstance(value, dict):
+        return {"result": value}
+    text = value.get("text", "")
+    url = value.get("url", "")
+    reason = _restriction_reason(url, text) if isinstance(url, str) and isinstance(text, str) else None
+    if isinstance(text, str):
+        value["text"] = text[:max_chars]
+    if reason:
+        value["access_status"] = "restricted"
+        value["restriction_reason"] = reason
+        value["retry_after_seconds"] = _record_restriction(url)
+    else:
+        value["access_status"] = "ok"
+    return value
 
 
 @mcp.tool()
@@ -193,12 +289,16 @@ def browser_click(selector: str, target_id: str | None = None) -> dict:
     """Click one CSS-selector-matched element in the current page."""
     if not selector or len(selector) > 512:
         raise ValueError("selector must contain 1-512 characters")
+    selected = _target(target_id)
+    current_host = urlsplit(selected.get("url", "")).hostname
+    if current_host:
+        _pace_navigation(current_host.lower())
     expression = """(function(){
       var el=document.querySelector(%s);
       if(!el)return {ok:false,error:'No element matches selector'};
       el.click(); return {ok:true};
     })()""" % json.dumps(selector)
-    value = _evaluate(expression, target_id)
+    value = _evaluate(expression, selected["id"])
     return value if isinstance(value, dict) else {"result": value}
 
 
