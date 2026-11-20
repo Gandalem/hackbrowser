@@ -67,7 +67,9 @@ class SourceTests(unittest.TestCase):
             node.name for node in tree.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and any(isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
-                    and d.func.attr == "tool" for d in node.decorator_list)
+                    and isinstance(d.func.value, ast.Name)
+                    and d.func.value.id == "mcp" and d.func.attr == "tool"
+                    for d in node.decorator_list)
         ]
         # Screenshot is provided through the MCP Apps extension, while the
         # other seven actions remain ordinary MCP tools.
