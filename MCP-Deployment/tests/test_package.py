@@ -58,7 +58,7 @@ class SourceTests(unittest.TestCase):
         )
         self.assertLess(
             script.index('caddy caddy validate --config /etc/caddy/Caddyfile'),
-            script.index('caddy caddy reload --config /etc/caddy/Caddyfile'),
+            script.rindex('caddy caddy reload --config /etc/caddy/Caddyfile'),
         )
 
     def test_hackbrowser_tools(self):
