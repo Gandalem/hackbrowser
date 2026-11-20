@@ -5,6 +5,8 @@ OAuth routes. Generic AI clients use the time-limited share path instead.
 """
 import asyncio
 import os
+import re
+from contextlib import suppress
 from functools import partial
 from pathlib import Path
 
@@ -34,6 +36,20 @@ RESPONSE_HEADERS = {
     "location", "content-encoding",
 }
 KEYS = PyJWKClient(JWKS, cache_jwk_set=True, lifespan=300, timeout=5)
+SESSION_MODE = os.environ.get("BROWSER_SESSION_MODE", "single")
+if SESSION_MODE not in {"single", "isolated"}:
+    raise ValueError("BROWSER_SESSION_MODE must be single or isolated")
+if SESSION_MODE == "isolated" and os.environ.get("ENABLE_OAUTH") != "1":
+    raise RuntimeError("Isolated browser mode requires ENABLE_OAUTH=1")
+OAUTH_GATEWAY_PORT = int(os.environ.get("OAUTH_GATEWAY_PORT", "8787"))
+STAGING_CLIENT = os.environ.get("HACKBROWSER_STAGING_TEST_CLIENT", "")
+if STAGING_CLIENT:
+    if (SESSION_MODE != "isolated" or OAUTH_GATEWAY_PORT == 8787
+            or not 1024 <= OAUTH_GATEWAY_PORT <= 65535
+            or re.fullmatch(r"hb-smoke-[a-z0-9]{12,24}", STAGING_CLIENT) is None):
+        raise ValueError("Staging OAuth test client requires a separate isolated gateway")
+
+
 
 
 def resource_url(service):
@@ -60,7 +76,10 @@ def verify_jwt(token, service):
         options={"require": ["iss", "sub", "exp", "aud"]},
         leeway=15,
     )
-    if claims.get("azp") != f"chatgpt-{service}":
+    allowed_clients = {f"chatgpt-{service}"}
+    if service == "hackbrowser" and STAGING_CLIENT:
+        allowed_clients.add(STAGING_CLIENT)
+    if claims.get("azp") not in allowed_clients:
         raise ValueError("OAuth client not authorized for this service")
     if f"mcp:{service}" not in set(str(claims.get("scope", "")).split()):
         raise ValueError("Missing service scope")
@@ -86,7 +105,7 @@ async def proxy(request, service):
     if len(auth) > 16384 or not auth.startswith("Bearer "):
         return challenge(service)
     try:
-        await asyncio.to_thread(verify_jwt, auth[7:].strip(), service)
+        claims = await asyncio.to_thread(verify_jwt, auth[7:].strip(), service)
     except (PyJWTError, ValueError, KeyError, OSError):
         return challenge(service)
     headers = {k: request.headers[k] for k in REQUEST_HEADERS if k in request.headers}
@@ -103,7 +122,19 @@ async def proxy(request, service):
             headers["Authorization"] = key
         except (OSError, ValueError):
             return web.Response(status=503, text="ZAP key unavailable")
-    url = BACKENDS[service] + ("?" + request.query_string if request.query_string else "")
+    owner_key = None
+    backend = BACKENDS[service]
+    if service == "hackbrowser" and SESSION_MODE == "isolated":
+        try:
+            subject = claims["sub"]
+            if not isinstance(subject, str) or not subject.strip():
+                return challenge(service)
+            backend, owner_key = await asyncio.to_thread(
+                request.app["isolated"].acquire, ISSUER + ":" + subject,
+            )
+        except (OSError, RuntimeError, ValueError):
+            return web.Response(status=503, text="Isolated browser session unavailable")
+    url = backend + ("?" + request.query_string if request.query_string else "")
     try:
         body = await request.read()
         async with request.app["upstream"].request(
@@ -126,17 +157,43 @@ async def proxy(request, service):
         return web.Response(status=502, text="MCP upstream unavailable")
     except ConnectionResetError:
         raise
+    finally:
+        if owner_key is not None:
+            await asyncio.to_thread(request.app["isolated"].release, owner_key)
 
 
 async def health(_request):
     return web.Response(text="ok")
 
 
+async def isolated_cleanup(manager):
+    while True:
+        await asyncio.sleep(60)
+        await asyncio.to_thread(manager.reap)
+
+
 async def lifespan(app):
     timeout = aiohttp.ClientTimeout(total=None, connect=5, sock_connect=5, sock_read=None)
     app["upstream"] = aiohttp.ClientSession(timeout=timeout, auto_decompress=False, trust_env=False)
-    yield
-    await app["upstream"].close()
+    cleaner = None
+    if SESSION_MODE == "isolated":
+        from isolated_backends import IsolatedBackends
+        app["isolated"] = IsolatedBackends(
+            ROOT,
+            max_sessions=int(os.environ.get("BROWSER_MAX_SESSIONS", "2")),
+            idle_seconds=int(os.environ.get("BROWSER_IDLE_SECONDS", "900")),
+            chromium=os.environ.get("CHROMIUM_BIN", "chromium"),
+        )
+        cleaner = asyncio.create_task(isolated_cleanup(app["isolated"]))
+    try:
+        yield
+    finally:
+        if cleaner:
+            cleaner.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleaner
+            await asyncio.to_thread(app["isolated"].shutdown)
+        await app["upstream"].close()
 
 
 app = web.Application(client_max_size=16 * 1024 * 1024)
@@ -148,4 +205,4 @@ for name in BACKENDS:
     app.router.add_route("*", f"/{name}/mcp", partial(proxy, service=name))
 
 if __name__ == "__main__":
-    web.run_app(app, host="127.0.0.1", port=8787, access_log=None)
+    web.run_app(app, host="127.0.0.1", port=OAUTH_GATEWAY_PORT, access_log=None)

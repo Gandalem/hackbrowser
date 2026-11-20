@@ -45,6 +45,8 @@ async def proxy(request):
     if not hmac.compare_digest(token, str(config["token"])):
         return web.Response(status=404)
     service = request.match_info["service"]
+    if service == "hackbrowser" and os.environ.get("BROWSER_SESSION_MODE", "single") == "isolated":
+        return web.Response(status=403, text="Browser sharing disabled in isolated mode")
     backend = BACKENDS.get(service)
     if backend is None:
         return web.Response(status=404)

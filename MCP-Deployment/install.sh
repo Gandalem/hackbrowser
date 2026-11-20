@@ -103,6 +103,8 @@ if ! id mcpstack >/dev/null 2>&1; then
   useradd --system --create-home --home-dir /var/lib/mcpstack --shell /usr/sbin/nologin mcpstack
 fi
 MCP_GROUP="$(id -gn mcpstack)"
+# Optional per-user browser profiles. Keep private to the service account.
+install -d -m 0700 -o mcpstack -g "$MCP_GROUP" "$ROOT/runtime/isolated-browser-profiles"
 chown root:"$MCP_GROUP" "$ROOT/runtime/secrets"
 chmod 0750 "$ROOT/runtime/secrets"
 
@@ -244,7 +246,7 @@ python3 -m venv "$ROOT/runtime/venv-pocmap"
 python3 -m venv "$ROOT/runtime/venv-hackbrowser"
 "$ROOT/runtime/venv-hackbrowser/bin/python" -m pip install --disable-pip-version-check -r "$ROOT/services/hackbrowser/requirements.txt"
 python3 -m venv "$ROOT/runtime/venv-gateway"
-"$ROOT/runtime/venv-gateway/bin/python" -m pip install --disable-pip-version-check 'aiohttp>=3.12,<4' 'PyJWT[crypto]>=2.10,<3'
+"$ROOT/runtime/venv-gateway/bin/python" -m pip install --disable-pip-version-check 'aiohttp>=3.12,<4' 'PyJWT[crypto]>=2.10,<3' 'websocket-client>=1.8,<2'
 "$ROOT/runtime/venv-gateway/bin/python" -m py_compile "$ROOT/services/gateway/"*.py
 "$ROOT/runtime/venv-hackbrowser/bin/python" -m py_compile \
   "$ROOT/services/hackbrowser/server.py" "$ROOT/services/hackbrowser/playwright_control.py"

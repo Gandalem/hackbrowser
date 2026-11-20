@@ -23,7 +23,10 @@ class GuiOnlyTests(unittest.TestCase):
         bindings = {t.id: node.value for node in tree.body
                     if isinstance(node, ast.Assign) for t in node.targets
                     if isinstance(t, ast.Name)}
-        self.assertEqual(ast.literal_eval(bindings["CDP_PORT"]), 9223)
+        # The legacy GUI default stays at 9223; isolated bridge instances can override it.
+        port_expr = bindings["CDP_PORT"]
+        self.assertIsInstance(port_expr, ast.Call)
+        self.assertEqual(ast.literal_eval(port_expr.args[0].args[1]), "9223")
         self.assertIn("GUI Chromium", script)
 
     def test_install_and_upgrade_disable_legacy_unit(self):

@@ -6,6 +6,7 @@ This helper never solves challenges, modifies profiles, or opens external CDP po
 from __future__ import annotations
 
 from urllib.parse import urlsplit
+import os
 import queue
 import threading
 import time
@@ -328,9 +329,9 @@ class _GuiWorker:
 def _validate_cdp(cdp_root: str) -> None:
     parsed = urlsplit(cdp_root)
     if (parsed.scheme != "http" or parsed.hostname != "127.0.0.1"
-            or parsed.port != 9223 or parsed.path not in {"", "/"}
+            or parsed.port != int(os.environ.get("HACKBROWSER_CDP_PORT", "9223")) or parsed.path not in {"", "/"}
             or parsed.username or parsed.password or parsed.query or parsed.fragment):
-        raise RuntimeError("Only the managed local GUI Chromium CDP 9223 is allowed")
+        raise RuntimeError("Only the configured managed local GUI Chromium CDP is allowed")
 
 
 _gui_worker = _GuiWorker()

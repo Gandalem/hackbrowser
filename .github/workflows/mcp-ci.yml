@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install test dependencies
-        run: python -m pip install --disable-pip-version-check PyYAML "aiohttp>=3.12,<4" "mcp>=2,<3" "websocket-client>=1.8,<2" "playwright>=1.56,<2" "ruff==0.14.6"
+        run: python -m pip install --disable-pip-version-check PyYAML "aiohttp>=3.12,<4" "PyJWT[crypto]>=2.10,<3" "mcp>=2,<3" "websocket-client>=1.8,<2" "playwright>=1.56,<2" "ruff==0.14.6"
       - name: Lint Python and verify screenshot JavaScript syntax
         working-directory: MCP-Deployment
         run: |
@@ -44,6 +44,7 @@ jobs:
           set -o pipefail
           mkdir -p evidence
           python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee evidence/ci-tests.log
+          python -m unittest discover -s services/hackbrowser -p 'test_session_pool.py' -v 2>&1 | tee -a evidence/ci-tests.log
       - name: Validate deploy and smoke scripts
         run: |
           bash -n scripts/deploy_release.sh scripts/package_release.sh
