@@ -127,6 +127,56 @@ def _cdp(method: str, params: dict | None = None, target_id: str | None = None) 
             conn.close()
 
 
+_tab_cleanup_lock = threading.Lock()
+
+
+def _browser_cdp(method: str, params: dict | None = None) -> dict:
+    """Send a fixed, server-owned CDP command via LOCAL browser WebSocket.
+
+    No user-supplied CDP methods or socket URLs are accepted by MCP tools.
+    Browser-level Target.closeTarget works independently of a closing page's
+    WebSocket, so tab closure does not race the command response.
+    """
+    req = Request(CDP_ROOT + "/json/version", headers={"Accept": "application/json"})
+    try:
+        with _opener.open(req, timeout=3) as response:
+            info = json.loads(response.read(65536))
+    except (OSError, ValueError, TypeError) as exc:
+        raise RuntimeError("Local GUI Chromium browser endpoint unavailable") from exc
+    ws_url = info.get("webSocketDebuggerUrl") if isinstance(info, dict) else None
+    if not isinstance(ws_url, str):
+        raise RuntimeError("No browser-level DevTools WebSocket was returned")
+    parsed = urlsplit(ws_url)
+    if (parsed.scheme != "ws" or parsed.hostname not in {"127.0.0.1", "localhost"}
+            or parsed.port != CDP_PORT
+            or not parsed.path.startswith("/devtools/browser/")
+            or parsed.username or parsed.password):
+        raise RuntimeError("Refusing non-local or non-browser DevTools endpoint")
+    conn = None
+    try:
+        conn = websocket.create_connection(
+            ws_url, timeout=8, enable_multithread=True, suppress_origin=True,
+        )
+        conn.send(json.dumps({"id": 1, "method": method, "params": params or {}}))
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            try:
+                message = json.loads(conn.recv())
+            except websocket.WebSocketTimeoutException:
+                continue
+            if message.get("id") != 1:
+                continue
+            if "error" in message:
+                raise RuntimeError(f"Browser CDP {method} failed: {message['error']}")
+            return message.get("result", {})
+        raise TimeoutError(f"Browser CDP {method} did not respond")
+    except (OSError, websocket.WebSocketException) as exc:
+        raise RuntimeError(f"Browser CDP transport error: {type(exc).__name__}") from exc
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def _evaluate(expression: str, target_id: str | None = None,
               await_promise: bool = False):
     parameters = {"expression": expression, "returnByValue": True}
@@ -402,6 +452,65 @@ def browser_tabs() -> list[dict]:
         {"target_id": t["id"], "type": t.get("type"), "title": t.get("title", ""), "url": t.get("url", "")}
         for t in _targets()
     ]
+
+
+@mcp.tool()
+def browser_close_tabs(target_ids: list[str], keep_one_blank: bool = True) -> dict:
+    """Close ONLY explicitly identified, currently open GUI Chromium tabs.
+
+    The caller must list exact target IDs from browser_tabs(). When all tabs
+    are selected, keep a new about:blank page so Chromium/CDP remains running.
+    Never clear cookies, kill Chromium or reset its GUI profile.
+    """
+    if (not isinstance(target_ids, list) or not 1 <= len(target_ids) <= 20
+            or any(not isinstance(t, str) or not t for t in target_ids)
+            or len(set(target_ids)) != len(target_ids)):
+        raise ValueError("Provide 1-20 unique target IDs from browser_tabs()")
+    if not isinstance(keep_one_blank, bool):
+        raise ValueError("keep_one_blank must be a boolean")
+
+    with _tab_cleanup_lock:
+        before = _targets()
+        current = {tab["id"]: tab for tab in before}
+        unknown = [tid for tid in target_ids if tid not in current]
+        if unknown:
+            raise ValueError(
+                "One or more target IDs are no longer open; call browser_tabs() again"
+            )
+        # Only close user-visible page tabs, not browser-internal webviews.
+        if any(current[tid].get("type") != "page" for tid in target_ids):
+            raise ValueError("Only regular page tabs may be closed")
+        new_blank_id = None
+        remaining_pages = [
+            tab for tab in before
+            if tab.get("type") == "page" and tab["id"] not in target_ids
+        ]
+        if keep_one_blank and not remaining_pages:
+            created = _browser_cdp("Target.createTarget", {"url": "about:blank"})
+            new_blank_id = created.get("targetId")
+            if not isinstance(new_blank_id, str) or not new_blank_id:
+                raise RuntimeError("Could not create a safe blank tab; no tabs closed")
+        outcomes = []
+        for tid in target_ids:
+            try:
+                response = _browser_cdp("Target.closeTarget", {"targetId": tid})
+                outcomes.append({"target_id": tid, "closed": bool(response.get("success"))})
+            except (OSError, RuntimeError, TimeoutError):
+                # A failed or dropped response is ambiguous, so inspect below.
+                outcomes.append({"target_id": tid, "closed": None})
+        after = _targets()
+        remaining = {tab["id"] for tab in after}
+        for item in outcomes:
+            item["closed"] = item["target_id"] not in remaining
+        return {
+            "requested": len(target_ids),
+            "closed": sum(1 for item in outcomes if item["closed"]),
+            "results": outcomes,
+            "remaining_tabs": len(after),
+            "remaining_target_ids": [tab["id"] for tab in after],
+            "blank_tab_id": new_blank_id,
+            "gui_kept_running": True,
+        }
 
 
 @mcp.tool()
