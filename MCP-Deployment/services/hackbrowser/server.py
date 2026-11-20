@@ -143,6 +143,12 @@ _tab_cleanup_lock = threading.Lock()
 
 
 def _browser_cdp(method: str, params: dict | None = None) -> dict:
+    with _manual_handoff.lock:
+        _manual_handoff.assert_ai_allowed()
+        return _browser_cdp_raw(method, params)
+
+
+def _browser_cdp_raw(method: str, params: dict | None = None) -> dict:
     """Send a fixed, server-owned CDP command via LOCAL browser WebSocket.
 
     No user-supplied CDP methods or socket URLs are accepted by MCP tools.
