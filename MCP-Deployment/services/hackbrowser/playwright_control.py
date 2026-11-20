@@ -101,7 +101,7 @@ def _run_connected(browser, selected: dict, action: str, args: dict,
     before_targets = _safe_targets(list_targets)
     before_ids = {item["id"] for item in before_targets}
     before_url = page.url
-    before_text = _body_sample(page) if action in {"click", "click_text", "press", "click_at"} else ""
+    before_text = _body_sample(page) if action in {"click", "click_text", "press", "click_at", "safe_link", "safe_search"} else ""
     result = {"ok": True, "action": action, "target_id": selected["id"]}
     try:
         if action == "click":
@@ -112,6 +112,68 @@ def _run_connected(browser, selected: dict, action: str, args: dict,
                 args.get("container_selector"),
             )
             locator.click(timeout=ACTION_TIMEOUT_MS)
+        elif action == "safe_link":
+            from workflow_engine import safe_link
+            if "selector" in args:
+                locator = page.locator(args["selector"])
+                matches = locator.count()
+                if matches != 1:
+                    raise ValueError(f"Link selector matched {matches} elements")
+                locator = locator.first
+            else:
+                locator = _choose_text_locator(
+                    page, args["text"], "link", True, args.get("container_selector"),
+                )
+            info = locator.evaluate("""(el) => ({
+                tag: el.tagName.toLowerCase(),
+                href: el.href || '',
+                label: (el.innerText || el.getAttribute('aria-label') || '').trim(),
+                download: el.hasAttribute('download')
+            })""")
+            if (info.get("tag") != "a" or info.get("download")
+                    or not safe_link(info.get("href", ""), info.get("label", ""))):
+                raise ValueError(
+                    "This link is not a safe, public navigation target. "
+                    "Use an explicit user-approved browser action instead."
+                )
+            locator.click(timeout=ACTION_TIMEOUT_MS)
+        elif action == "safe_search":
+            from workflow_engine import safe_public_url
+            locator = page.locator(args["selector"])
+            if locator.count() != 1:
+                raise ValueError("Search selector must match exactly one input")
+            locator = locator.first
+            info = locator.evaluate("""(el) => {
+                const form = el.form || el.closest('form');
+                const type = (el.getAttribute('type') || 'text').toLowerCase();
+                const label = (el.name || '') + ' ' +
+                    (el.getAttribute('placeholder') || '') + ' ' +
+                    (el.getAttribute('aria-label') || '');
+                return {
+                    tag: el.tagName.toLowerCase(), type,
+                    label, form: !!form,
+                    method: form ? (form.method || 'get').toLowerCase() : '',
+                    action: form ? form.action : '',
+                    password: !!(form && form.querySelector('input[type="password"]'))
+                };
+            }""")
+            if (info.get("tag") != "input"
+                    or info.get("type") not in {"search", "text"}
+                    or not info.get("form") or info.get("method") != "get"
+                    or info.get("password")
+                    or not safe_public_url(info.get("action", ""))
+                    or not __import__("re").search(
+                        r"(search|query|keyword|검색|찾기|(^|\s)q(\s|$))",
+                        info.get("label", ""), __import__("re").IGNORECASE,
+                    )):
+                raise ValueError(
+                    "Workflow search requires a visible GET search form "
+                    "without a password field"
+                )
+            locator.fill(args["text"], timeout=ACTION_TIMEOUT_MS)
+            if locator.input_value() != args["text"]:
+                raise ValueError("Search text was not retained")
+            locator.press("Enter", timeout=ACTION_TIMEOUT_MS)
         elif action == "fill":
             locator = page.locator(args["selector"]).first
             locator.fill(args["value"], timeout=ACTION_TIMEOUT_MS)

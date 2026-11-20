@@ -123,7 +123,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
   http://127.0.0.1:8088/pocmap/mcp
 ```
 
-기대 결과: `/healthz`는 **200**, 인증 없는 `/pocmap/mcp`는 **401**, MCP 도구 검색은 PocMap 22 / HackBrowser 16 / ZAP 17개입니다. `check_calls.py`는 세 백엔드의 실제 호출과 HackBrowser PNG 이미지 블록을 확인합니다.
+기대 결과: `/healthz`는 **200**, 인증 없는 `/pocmap/mcp`는 **401**, MCP 도구 검색은 PocMap 22 / HackBrowser 19 / ZAP 17개입니다. `check_calls.py`는 세 백엔드의 실제 호출과 HackBrowser PNG 이미지 블록을 확인합니다.
 
 ## HackBrowser 스크린샷 미리보기 및 PNG 다운로드
 
@@ -143,12 +143,22 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 `browser_click_text`의 `container_selector`는 선택적 CSS 범위로, 같은 이름의 링크/버튼이 반복되는 화면에서도 원하는 영역을 명시하도록 돕습니다. 범위에 일치하는 컨테이너가 정확히 하나가 아니거나 해당 영역에 같은 이름이 여러 개라면 임의의 항목을 선택하지 않고 오류를 반환합니다. `browser_elements`로 CSS 위치를 확인한 뒤 범위를 지정하세요. 스크롤 및 Enter 외 방향키는 기존 접근 제한을 존중하면서 페이지 이동용 4초 대기를 사용하지 않습니다.
 
+## 안전한 복합 작업 실행 및 인증 후 재개
+
+`browser_workflow_start(steps, target_id)`는 기존 GUI Chromium 탭에서 최대 8단계의 안전한 탐색 계획을 처리합니다. 한 번 호출할 때 최대 3단계 실행하며, `browser_workflow_status(workflow_id)`로 진행 상태를 조회하고 `browser_workflow_resume(workflow_id)`로 다음 단계부터 이어갑니다. 작업 ID와 단계는 메모리에서 30분 뒤 만료되며 서버 재시작 시 사라집니다.
+
+허용 작업: `navigate`(공개 HTTPS), `search`(암호 필드 없는 GET 검색 폼), `click_link`(안전한 공개 링크), `wait`, `scroll`만 가능합니다. 비밀번호 입력, 결제, 삭제, 계정 변경, 파일 업로드, CAPTCHA 자동 해결, 임의 JavaScript는 제외됩니다. CAPTCHA 또는 로그인 화면에서는 일시 중단하고 사용자 직접 인증 뒤 현재 화면을 다시 검사합니다. 작업 결과가 불확실하거나 사이트 접근이 제한되면 반복 클릭 없이 중단합니다.
+
+예시: `[{"op":"navigate","url":"https://ko.wikipedia.org/wiki/위키백과:대문"},{"op":"search","selector":"#searchInput","text":"건담"},{"op":"wait","text":"건담"},{"op":"scroll","direction":"down","pixels":400}]`
+
+현재 브라우저 세션은 서버 사용자 간 공유되므로 다중 사용자 격리 운영용으로 사용하지 마세요.
+
 ## Playwright GUI 조작 엔진
 
 좌표 클릭 도구는 Playwright Python `mouse.click(x, y)`를 사용하며, 뷰포트 바깥 좌표는 거부합니다. 텍스트가 여러 요소에 중복 매칭되면 첫 요소를 임의로 클릭하지 않고 `ok:false`와 일치 개수를 반환합니다. 텍스트 클릭 실패 시 `browser_elements`에서 특정 CSS 선택자를 확인하세요.
 
 
-Playwright는 **이미 실행 중인 GUI Chromium의 로컬 CDP 9223**에만 연결합니다. 새 브라우저/프로필을 생성하거나 로그인 쿠키를 초기화하지 않습니다. 기존 13개 도구는 유지하고, 아래 도구 3개가 추가되어 HackBrowser는 총 16개입니다.
+Playwright는 **이미 실행 중인 GUI Chromium의 로컬 CDP 9223**에만 연결합니다. 새 브라우저/프로필을 생성하거나 로그인 쿠키를 초기화하지 않습니다. 기존 13개 도구는 유지하고, 아래 도구 3개가 추가되어 HackBrowser는 기존 16개 도구와 신규 워크플로 3개로 총 19개입니다.
 
 - `browser_click`: Playwright 실제 클릭, 동작 가능 여부 대기, URL/새 탭 감지
 - `browser_fill`: 실제 입력 이벤트와 입력 유지 여부 검사(비밀번호 및 본문 내용은 응답하지 않음)
