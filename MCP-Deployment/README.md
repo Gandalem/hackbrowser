@@ -125,19 +125,13 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 기대 결과: `/healthz`는 **200**, 인증 없는 `/pocmap/mcp`는 **401**, MCP 도구 검색은 PocMap 22 / HackBrowser 8 / ZAP 17개입니다. `check_calls.py`는 세 백엔드의 실제 호출과 HackBrowser PNG 이미지 블록을 확인합니다.
 
-## HackBrowser 스크린샷 다운로드
+## HackBrowser 스크린샷 미리보기 및 PNG 다운로드
 
-`browser_screenshot`은 기존처럼 MCP `image/png` 블록과 서버의 비공개 저장 경로를 반환합니다. **추가로** `PUBLIC_BASE_URL`이 설정된 서버에서는 응답 메타데이터에 `download_url`과 `expires_in_seconds: 600`을 제공합니다. 다운로드는 `/captures/hb-<무작위 48자리 16진수>.png` 경로를 통해 진행하며 10분 후 HTTP 404를 반환합니다. 링크는 로그인 대신 무작위 ID가 접근 권한 역할을 하므로 절대 공개하지 마세요.
+`browser_screenshot`은 MCP `ImageContent`의 PNG 바이트와 크기·MIME 메타데이터를 반환합니다. `ui://hackbrowser/screenshot.html` MCP Apps 뷰어에서 바로 표시하며 채팅 너비에 맞게 축소하고 높이는 최대 440px로 제한합니다.
 
-이 URL은 **파일 다운로드용 대체 경로**이며, ChatGPT가 자동으로 PNG를 채팅 첨부파일로 등록하는 기능을 보장하지 않습니다. 사용 중인 ChatGPT 클라이언트에서 별도로 확인해야 합니다. 이전과 동일하게 사용자 데이터가 포함된 화면을 캡처할 수 있으므로 캡처 URL을 공유하지 마세요.
+`PNG 다운로드` 버튼은 브라우저 iframe의 가상 클릭이 아닌 **MCP Apps 표준 `ui/download-file`** 호스트 요청으로 PNG를 저장합니다. 호스트가 다운로드 기능을 광고하지 않으면 ChatGPT에서 사용 가능한 `uploadFile`·`getFileDownloadUrl`·`openExternal` API로 대체 처리합니다. 다운로드 권한 또는 파일 API가 없는 환경에서는 실패 사유를 화면에 표시합니다. 실제 저장은 사용 중인 ChatGPT 클라이언트가 이 기능을 지원해야 합니다.
 
-## ChatGPT 스크린샷 인라인 미리보기 (실험적)
-
-`browser_screenshot`에 MCP Apps UI 메타데이터(`ui.resourceUri` 및 `openai/outputTemplate`)와 자체 HTML 이미지 뷰어(`ui://hackbrowser/screenshot.html`)를 추가했습니다. UI 호스트가 MCP Apps 리소스를 표시한다면 **외부의 만료되는 `/captures/*` URL 대신 MCP `ImageContent`의 PNG 바이트**로 화면을 표시하고, 이미지 뷰어 내에서 PNG를 저장할 수 있습니다. 기존 PNG 데이터 블록과 다운로드 링크는 그대로 유지됩니다.
-
-**이미지 표시:** 뷰어는 캡처 원본을 채팅 너비에 맞춰 축소하고, 높이를 최대 440px로 제한하며, 호스트에 콘텐츠 높이 변경을 통지합니다. 캡처 원본 전체는 PNG 다운로드 버튼으로 저장할 수 있습니다. **채팅 답변에 별도의 외부 `/captures/*` 이미지를 다시 삽입하지 마세요.** 해당 링크는 10분 후 만료되어 아래쪽에 깨진 이미지가 중복 표시됩니다.
-
-**주의:** 일반 ChatGPT MCP 커넥터가 이 UI 메타데이터를 지원하는지는 호스트 버전·설정에 따라 달라질 수 있습니다. UI가 나타나지 않으면 기존 이미지 데이터와 다운로드 링크만 사용 가능합니다. 뷰어는 이미지 미리보기와 PNG 다운로드 기능만 제공합니다. 일반 채팅 메시지에 PNG를 독립된 첨부파일로 등록하는 기능은 지원하지 않습니다. 재연결 후 실제 ChatGPT 화면에서 검증해야 합니다.
+공개 `/captures/*` URL, 서버의 PNG 다운로드 핸들러, 별도 PNG 파일 저장은 제거했습니다. 외부에 스크린샷 주소를 발급하거나 만료 링크를 채팅에 삽입하지 않습니다. 기존 릴리스에서 생성된 파일은 자동 삭제하지 않습니다.
 
 ## 스크린샷 한글 폰트 깨짐(□) 해결
 
