@@ -88,6 +88,24 @@ class ScreenshotTests(unittest.TestCase):
         self.assertNotIn("<script src=", html)
         self.assertNotIn("<img src=", html)
 
+    def test_transient_screenshot_transport_error_retries_once(self):
+        encoded = base64.b64encode(PNG).decode("ascii")
+        with mock.patch.object(browser, "_cdp", side_effect=[
+            RuntimeError("CDP transport error: connection closed"),
+            {"data": encoded},
+        ]) as cdp:
+            result = browser.browser_screenshot()
+        self.assertEqual(cdp.call_count, 2)
+        self.assertEqual(base64.b64decode(result[1].data), PNG)
+
+    def test_nontransport_screenshot_error_is_not_retried(self):
+        with mock.patch.object(browser, "_cdp", side_effect=RuntimeError(
+            "CDP Page.captureScreenshot: permission denied",
+        )) as cdp:
+            with self.assertRaisesRegex(RuntimeError, "permission denied"):
+                browser.browser_screenshot()
+        self.assertEqual(cdp.call_count, 1)
+
     def test_invalid_base64_rejected(self):
         with mock.patch.object(browser, "_cdp", return_value={"data": "not-base64!"}):
             with self.assertRaisesRegex(RuntimeError, "invalid base64"):
