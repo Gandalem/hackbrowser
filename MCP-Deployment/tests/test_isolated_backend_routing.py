@@ -58,6 +58,19 @@ class IsolatedRoutingTests(unittest.TestCase):
                 manager.shutdown()
                 self.assertFalse(manager.bridges)
 
+    def test_smoke_browser_tabs_decoding(self):
+        import importlib.util
+        script = SERVICES.parent / "scripts" / "smoke_isolated_browser.py"
+        spec = importlib.util.spec_from_file_location("isolated_smoke_test", script)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        item = {"target_id": "example-id", "url": "about:blank"}
+        self.assertEqual(module.normalize_tabs([item]), [item])
+        self.assertEqual(module.normalize_tabs({"result": [item]}), [item])
+        for invalid in ({}, {"result": []}, {"result": {}}, {"result": [{}]}):
+            with self.assertRaises(ValueError):
+                module.normalize_tabs(invalid)
+
     def test_invalid_user_identity_is_rejected(self):
         for identity in (None, "", " "):
             with self.assertRaises(ValueError):
