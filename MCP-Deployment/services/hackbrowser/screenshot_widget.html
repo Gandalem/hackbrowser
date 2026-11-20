@@ -29,7 +29,12 @@
     #verification-submit { margin-top: 8px; font-weight: 650; }
     #resume-agent { font-weight: 650; }
     .verification-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    .verification-active { cursor: crosshair; }
+    .verification-active, .handoff-active { cursor: crosshair; }
+    .manual-panel { margin-top: 8px; padding: 10px; border: 1px solid #8886;
+      border-radius: 8px; display: grid; gap: 7px; }
+    .manual-panel .toolbar { margin-top: 0; }
+    .manual-note { opacity: .78; font-size: 12px; }
+
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -39,8 +44,21 @@
     <img id="preview" class="preview" alt="HackBrowser가 캡처한 실제 브라우저 화면" />
     <div class="toolbar">
       <button id="download" type="button" disabled>PNG 다운로드</button>
+      <button id="live-toggle" type="button" disabled aria-pressed="false">자동 새로고침 켜기</button>
       <span id="details"></span>
     </div>
+    <section class="manual-panel" aria-label="GUI 수동 제어">
+      <div class="toolbar">
+        <button id="handoff-take" type="button" disabled>AI 일시정지 · 직접 조작</button>
+        <button id="handoff-return" type="button" hidden>AI에 제어권 반환</button>
+        <span id="handoff-state" role="status" aria-live="polite">브라우저 화면 확인 후 사용 가능</span>
+      </div>
+      <div id="handoff-scroll" class="toolbar" hidden>
+        <button id="handoff-up" type="button">위로 스크롤</button>
+        <button id="handoff-down" type="button">아래로 스크롤</button>
+      </div>
+      <p class="manual-note">화면 갱신은 선택 사항이며 4초 간격으로만 실행합니다. 직접 조작 중에는 화면을 클릭하거나 스크롤할 수 있습니다. 계정·결제·인증 정보 입력은 지원하지 않습니다. 현재 서버는 사용자별 브라우저 세션을 분리하지 않습니다.</p>
+    </section>
     <section id="verification-card" hidden aria-label="사용자 인증 입력">
       <h2>사용자 인증이 필요합니다</h2>
       <p>이미지 선택형 CAPTCHA는 <strong>이미지 직접 클릭</strong>을 사용하세요. 텍스트형 CAPTCHA는 아래에 답을 입력하고 화면에서 <strong>답 입력칸</strong>과
@@ -70,6 +88,19 @@
     const preview = document.getElementById("preview");
     const status = document.getElementById("status");
     const download = document.getElementById("download");
+    const liveToggle = document.getElementById("live-toggle");
+    const handoffTake = document.getElementById("handoff-take");
+    const handoffReturn = document.getElementById("handoff-return");
+    const handoffState = document.getElementById("handoff-state");
+    const handoffScroll = document.getElementById("handoff-scroll");
+    const handoffUp = document.getElementById("handoff-up");
+    const handoffDown = document.getElementById("handoff-down");
+    let handoffToken = null;
+    let handoffTarget = null;
+    let handoffBusy = false;
+    let handoffRemoteActive = false;
+    let liveTimer = null;
+    let liveBusy = false;
     const details = document.getElementById("details");
     const verificationCard = document.getElementById("verification-card");
     const verificationAnswer = document.getElementById("verification-answer");
@@ -159,6 +190,15 @@
       pausedWorkflowId = typeof metadata?.paused_workflow?.workflow_id === "string"
         ? metadata.paused_workflow.workflow_id : null;
       lastVerificationTarget = metadata?.target_id || lastVerificationTarget;
+      handoffRemoteActive = metadata?.handoff?.active === true;
+      // Expired leases must not trap this card in unusable manual mode.
+      if (handoffToken && (!handoffRemoteActive ||
+          metadata?.handoff?.target_id !== handoffTarget)) {
+        handoffToken = null;
+        handoffTarget = null;
+        handoffState.textContent = "수동 제어 시간이 만료되어 AI 제어로 복귀했습니다.";
+      }
+      updateManualControls();
       if (!value?.required || typeof value.id !== "string" ||
           !Number.isInteger(value.viewport?.width) ||
           !Number.isInteger(value.viewport?.height)) {
@@ -175,6 +215,7 @@
           resumeAgent.hidden = false;
           verificationStatus.textContent = "인증 화면이 보이지 않습니다. 현재 페이지가 정상인지 확인한 뒤, 보류된 작업을 재개할 수 있습니다.";
         }
+        updateManualControls();
         return;
       }
       lastVerificationTarget = metadata.target_id || lastVerificationTarget;
@@ -188,7 +229,138 @@
       verificationStatus.textContent = "인증 답변은 직접 입력해야 하며, 자동으로 풀지 않습니다.";
       verificationCard.hidden = false;
       updateVerificationControls();
+      updateManualControls();
     }
+
+    function toolObject(result) {
+      const obj = result?.structuredContent;
+      if (obj && typeof obj === "object" && "ok" in obj) return obj;
+      const blocks = captureContent(result);
+      const body = blocks.find(x => x?.type === "text")?.text;
+      if (typeof body === "string") {
+        try { return JSON.parse(body); } catch (_) {}
+      }
+      return obj && typeof obj === "object" ? obj : null;
+    }
+
+    function updateManualControls() {
+      const owned = !!handoffToken;
+      handoffTake.disabled = !lastVerificationTarget || owned || handoffBusy ||
+        handoffRemoteActive || !!activeVerification;
+      handoffReturn.hidden = !owned;
+      handoffReturn.disabled = !owned || handoffBusy;
+      handoffScroll.hidden = !owned;
+      handoffUp.disabled = !owned || handoffBusy;
+      handoffDown.disabled = !owned || handoffBusy;
+      preview.classList.toggle("handoff-active", owned);
+      handoffState.textContent = owned
+        ? "사용자가 제어 중 · 화면 클릭/스크롤 가능 (최대 10분)"
+        : handoffRemoteActive
+          ? "다른 화면에서 수동 제어 중 또는 토큰 만료 대기"
+          : "AI 제어 중";
+    }
+
+    function imagePoint(event) {
+      const width = preview.naturalWidth, height = preview.naturalHeight;
+      const rect = preview.getBoundingClientRect();
+      if (!(width > 0 && height > 0 && rect.width > 0 && rect.height > 0)) return null;
+      const scale = Math.min(rect.width / width, rect.height / height);
+      const renderedW = width * scale, renderedH = height * scale;
+      const x = Math.floor((event.clientX - rect.left - (rect.width - renderedW) / 2) / scale);
+      const y = Math.floor((event.clientY - rect.top - (rect.height - renderedH) / 2) / scale);
+      return (x >= 0 && y >= 0 && x < width && y < height) ? {x, y} : null;
+    }
+
+    function stopLive() {
+      if (liveTimer) clearInterval(liveTimer);
+      liveTimer = null;
+      liveToggle.setAttribute("aria-pressed", "false");
+      liveToggle.textContent = "자동 새로고침 켜기";
+    }
+
+    liveToggle.addEventListener("click", () => {
+      if (liveTimer) { stopLive(); return; }
+      if (!lastVerificationTarget) return;
+      liveToggle.setAttribute("aria-pressed", "true");
+      liveToggle.textContent = "자동 새로고침 끄기";
+      liveTimer = setInterval(async () => {
+        if (document.hidden || liveBusy || handoffBusy || verificationSubmitting) return;
+        liveBusy = true;
+        try { await refreshCapture(); }
+        catch (err) { stopLive(); status.textContent = err?.message || "화면 갱신 실패"; }
+        finally { liveBusy = false; }
+      }, 4000);
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) stopLive();
+    });
+    window.addEventListener("pagehide", stopLive);
+
+    handoffTake.addEventListener("click", async () => {
+      if (!lastVerificationTarget || handoffBusy || handoffToken) return;
+      handoffBusy = true;
+      updateManualControls();
+      try {
+        const response = toolObject(await callMcpTool(
+          "browser_handoff_begin", {target_id: lastVerificationTarget}
+        ));
+        if (!response?.active || typeof response.control_token !== "string")
+          throw new Error("브라우저 수동 제어권을 받지 못했습니다.");
+        handoffToken = response.control_token;
+        handoffTarget = response.target_id;
+        handoffRemoteActive = true;
+        handoffState.textContent = "AI 제어가 일시정지되었습니다.";
+        await refreshCapture();
+      } catch (err) {
+        handoffState.textContent = err?.message || "제어권 요청 실패";
+      } finally {
+        handoffBusy = false;
+        updateManualControls();
+      }
+    });
+
+    handoffReturn.addEventListener("click", async () => {
+      if (!handoffToken || handoffBusy) return;
+      handoffBusy = true;
+      updateManualControls();
+      try {
+        const response = toolObject(await callMcpTool(
+          "browser_handoff_end", {control_token: handoffToken}
+        ));
+        if (!response?.returned_to_ai) throw new Error("제어권 반환 확인 실패");
+        handoffToken = null;
+        handoffTarget = null;
+        handoffRemoteActive = false;
+        await refreshCapture();
+      } catch (err) {
+        handoffState.textContent = err?.message || "반환 실패. 수동 제어 상태를 확인하세요.";
+      } finally {
+        handoffBusy = false;
+        updateManualControls();
+      }
+    });
+
+    async function sendManualInput(action, point) {
+      if (!handoffToken || !handoffTarget || handoffBusy) return;
+      handoffBusy = true;
+      updateManualControls();
+      try {
+        const response = toolObject(await callMcpTool(
+          "browser_handoff_input",
+          {control_token: handoffToken, target_id: handoffTarget, action,
+           x: point?.x || 0, y: point?.y || 0, pixels: 400}
+        ));
+        if (!response?.ok) throw new Error(response?.error || "수동 조작 결과를 확인하지 못했습니다.");
+        await refreshCapture();
+      } catch (err) {
+        handoffState.textContent = err?.message || "조작 실패. 화면을 확인하세요.";
+      } finally {
+        handoffBusy = false;
+        updateManualControls();
+      }
+    }
+    handoffUp.addEventListener("click", () => void sendManualInput("scroll_up"));
+    handoffDown.addEventListener("click", () => void sendManualInput("scroll_down"));
 
     function renderScreenshot(payload) {
       const blocks = captureContent(payload);
@@ -210,6 +382,7 @@
       preview.style.display = "block";
       status.textContent = "HackBrowser 스크린샷";
       download.disabled = false;
+      liveToggle.disabled = !metadata.target_id;
       setupVerification(metadata);
       scheduleHeightReport();
     }
@@ -335,6 +508,11 @@
       verificationStatus.textContent = "스크린샷에서 인증 확인 버튼 위치를 클릭하세요.";
     });
     preview.addEventListener("click", async (event) => {
+      if (handoffToken && !handoffBusy) {
+        const point = imagePoint(event);
+        if (point) await sendManualInput("click", point);
+        return;
+      }
       if (!picking || !activeVerification) return;
       const rect = preview.getBoundingClientRect();
       const scale = Math.min(

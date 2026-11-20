@@ -23,6 +23,13 @@ from mcp.server import MCPServer
 from mcp.server.apps import Apps
 from mcp.types import ImageContent, TextContent
 
+# Tests also load this module directly from a path rather than as a package.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from handoff import manual_handoff as _manual_handoff
+
+_handoff_input_local = threading.local()
+
 CDP_PORT = 9223
 MCP_PORT = int(os.environ.get("HACKBROWSER_MCP_PORT", "8765"))
 CDP_HOST = "127.0.0.1"
@@ -98,6 +105,14 @@ def _target(target_id: str | None) -> dict:
 
 
 def _cdp(method: str, params: dict | None = None, target_id: str | None = None) -> dict:
+    with _manual_handoff.lock:
+        if (method not in {"Runtime.evaluate", "Page.captureScreenshot"} and
+                not getattr(_handoff_input_local, "user_authorized", False)):
+            _manual_handoff.assert_ai_allowed()
+        return _cdp_raw(method, params, target_id)
+
+
+def _cdp_raw(method: str, params: dict | None = None, target_id: str | None = None) -> dict:
     target = _target(target_id)
     ws_url = target["webSocketDebuggerUrl"]
     parsed = urlsplit(ws_url)
@@ -131,6 +146,12 @@ _tab_cleanup_lock = threading.Lock()
 
 
 def _browser_cdp(method: str, params: dict | None = None) -> dict:
+    with _manual_handoff.lock:
+        _manual_handoff.assert_ai_allowed()
+        return _browser_cdp_raw(method, params)
+
+
+def _browser_cdp_raw(method: str, params: dict | None = None) -> dict:
     """Send a fixed, server-owned CDP command via LOCAL browser WebSocket.
 
     No user-supplied CDP methods or socket URLs are accepted by MCP tools.
@@ -196,6 +217,7 @@ def _evaluate(expression: str, target_id: str | None = None,
 
 def _gui_action(selected: dict, action: str, args: dict) -> dict:
     """Use the existing GUI CDP session; never spawn or reset Chromium."""
+    _manual_handoff.assert_ai_allowed()
     from playwright_control import run_action
     return run_action(CDP_ROOT, selected, action, args, _targets)
 
@@ -420,12 +442,14 @@ def browser_workflow_start(steps: list[dict], target_id: str) -> dict:
     Payments, state-changing submissions, credential entry and CAPTCHA solving
     are never run by workflows. Next batches need an explicit resume call.
     """
+    _manual_handoff.assert_ai_allowed()
     return _workflows.start(steps, target_id)
 
 
 @mcp.tool()
 def browser_workflow_resume(workflow_id: str) -> dict:
     """After manual verification, resume next safe steps, never replaying clicks."""
+    _manual_handoff.assert_ai_allowed()
     return _workflows.resume(workflow_id)
 
 
@@ -511,6 +535,86 @@ def browser_close_tabs(target_ids: list[str], keep_one_blank: bool = True) -> di
             "blank_tab_id": new_blank_id,
             "gui_kept_running": True,
         }
+
+
+@mcp.tool()
+def browser_handoff_begin(target_id: str) -> dict:
+    """Explicit user takeover of one shared GUI for at most ten minutes.
+
+    The capability token is not user authentication. Only an authenticated
+    MCP Apps operator should receive it. User profiles are still shared.
+    """
+    selected = _target(target_id)
+    if selected.get("type") != "page":
+        raise ValueError("Manual control requires a regular GUI browser tab")
+    with _manual_handoff.lock:
+        if _verification_state(selected["id"]).get("verification_reason"):
+            raise RuntimeError(
+                "Use the existing CAPTCHA card for manual verification"
+            )
+        viewport = _evaluate(
+            "({width: innerWidth, height: innerHeight})", selected["id"]
+        )
+        return _manual_handoff.begin(selected["id"], viewport)
+
+
+@mcp.tool()
+def browser_handoff_status() -> dict:
+    """Read-only takeover status without exposing the control token."""
+    return _manual_handoff.status()
+
+
+@mcp.tool()
+def browser_handoff_input(control_token: str, target_id: str, action: str,
+                          x: int = 0, y: int = 0, pixels: int = 400) -> dict:
+    """One user-triggered click or scroll during a manual takeover.
+
+    No text typing, keys, arbitrary scripts, or CAPTCHA automation.
+    """
+    if action not in {"click", "scroll_up", "scroll_down"}:
+        raise ValueError("Only click and vertical scroll are supported")
+    if type(x) is not int or type(y) is not int or type(pixels) is not int:
+        raise ValueError("Coordinates and pixels must be integers")
+    if not 1 <= pixels <= 1200:
+        raise ValueError("Scroll pixels must be 1-1200")
+    with _manual_handoff.lock:
+        viewport = _manual_handoff.authenticate(control_token, target_id)
+        state = _verification_state(target_id)
+        if state.get("verification_reason"):
+            raise RuntimeError(
+                "Manual verification detected; use the existing CAPTCHA card"
+            )
+        selected = _target(target_id)
+        if selected.get("type") != "page":
+            raise RuntimeError("The selected GUI tab is no longer available")
+        live_viewport = _evaluate(
+            "({width: innerWidth, height: innerHeight})", target_id
+        )
+        if live_viewport != viewport:
+            raise ValueError("Viewport changed; end takeover and recapture")
+        _handoff_input_local.user_authorized = True
+        try:
+            if action == "click":
+                if not (0 <= x < viewport["width"] and 0 <= y < viewport["height"]):
+                    raise ValueError("Click must be within the GUI viewport")
+                _click_at(target_id, x, y)
+            else:
+                delta = pixels if action == "scroll_down" else -pixels
+                _cdp("Input.dispatchMouseEvent", {
+                    "type": "mouseWheel",
+                    "x": viewport["width"] // 2, "y": viewport["height"] // 2,
+                    "deltaX": 0, "deltaY": delta,
+                }, target_id)
+        finally:
+            _handoff_input_local.user_authorized = False
+        return {"ok": True, "action": action, "target_id": target_id,
+                "message": "User input sent once. Refresh the screenshot to confirm."}
+
+
+@mcp.tool()
+def browser_handoff_end(control_token: str) -> dict:
+    """Return GUI control to AI after a user finishes."""
+    return _manual_handoff.finish(control_token)
 
 
 @mcp.tool()
@@ -821,7 +925,9 @@ def browser_scroll(direction: str = "down", pixels: int = 600,
         },90);
       });
     })()""" % (json.dumps(selector is not None), json.dumps(selector), axis, amount)
-    result = _evaluate(expression, target["id"], await_promise=True)
+    with _manual_handoff.lock:
+        _manual_handoff.assert_ai_allowed()
+        result = _evaluate(expression, target["id"], await_promise=True)
     return result if isinstance(result, dict) else {"result": result}
 
 
@@ -924,6 +1030,9 @@ def browser_screenshot(target_id: str | None = None) -> list[TextContent | Image
         raise RuntimeError("Screenshot exceeds the 8 MiB limit")
 
     metadata = {"bytes": len(png), "mime_type": "image/png"}
+    active_handoff = _manual_handoff.status()
+    if active_handoff["active"]:
+        metadata["handoff"] = active_handoff
     # Only render the manual-entry UI when the actual open tab shows a
     # recognized verification prompt. Never infer the answer or bypass it.
     try:
@@ -970,12 +1079,15 @@ def browser_screenshot(target_id: str | None = None) -> list[TextContent | Image
 
 
 def _click_at(target_id: str, x: int, y: int) -> None:
-    """Use page coordinates so a human-selected input in an iframe can be focused."""
-    for event_type in ("mousePressed", "mouseReleased"):
-        _cdp("Input.dispatchMouseEvent", {
-            "type": event_type, "x": x, "y": y, "button": "left",
-            "clickCount": 1,
-        }, target_id)
+    """Serialize both mouse events against any takeover transition."""
+    with _manual_handoff.lock:
+        if not getattr(_handoff_input_local, "user_authorized", False):
+            _manual_handoff.assert_ai_allowed()
+        for event_type in ("mousePressed", "mouseReleased"):
+            _cdp("Input.dispatchMouseEvent", {
+                "type": event_type, "x": x, "y": y, "button": "left",
+                "clickCount": 1,
+            }, target_id)
 
 
 @mcp.tool()

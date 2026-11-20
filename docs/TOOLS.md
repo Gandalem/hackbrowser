@@ -1,4 +1,4 @@
-# MCP 도구 레퍼런스 (PocMap 22 · HackBrowser 22 · ZAP 17)
+# MCP 도구 레퍼런스 (PocMap 22 · HackBrowser 26 · ZAP 17)
 
 [프로젝트 설치](../README.md) · [운영 및 계정 관리](../MCP-Deployment/README.md)
 
@@ -46,10 +46,14 @@
 </details>
 
 <details>
-<summary><b>HackBrowser MCP — AI GUI Chromium 도구 22개</b></summary>
+<summary><b>HackBrowser MCP — AI GUI Chromium 도구 26개</b></summary>
 
 | 도구 | 기능 | 주요 입력값 |
 |---|---|---|
+| `browser_handoff_begin` | 사용자가 GUI 직접 조작을 시작하고 AI 변경 작업 일시정지 (10분) | `target_id` |
+| `browser_handoff_status` | 임시 수동 제어 여부 확인 (토큰 미노출) | 없음 |
+| `browser_handoff_input` | 수동 제어 중 사용자 클릭·위/아래 스크롤 한 번 전달 | `control_token`, `target_id`, `action`, `x`, `y`, `pixels` |
+| `browser_handoff_end` | 사용자 직접 조작 종료 및 AI 제어 복귀 | `control_token` |
 | `browser_status` | GUI Chromium CDP 연결 상태 | 없음 |
 | `browser_tabs` | 열린 탭 및 ID 조회 | 없음 |
 | `browser_close_tabs` | 지정한 탭 종료 (빈 탭 유지 가능) | `target_ids`, `keep_one_blank` |
