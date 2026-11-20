@@ -229,7 +229,7 @@
       if (verificationSubmit.disabled || verificationSubmitting ||
           !activeVerification || !inputPoint || !confirmPoint) return;
       const answer = verificationAnswer.value.trim();
-      if (!answer || answer.length > 64 || /[\\x00-\\x1F\\x7F]/.test(answer)) {
+      if (!answer || answer.length > 64 || /[\x00-\x1F\x7F]/.test(answer)) {
         verificationStatus.textContent = "유효한 한 줄 답변을 입력하세요.";
         return;
       }
