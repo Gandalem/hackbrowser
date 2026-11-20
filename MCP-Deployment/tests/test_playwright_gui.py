@@ -207,7 +207,7 @@ class GuiActionTests(unittest.TestCase):
         fake_module.Error = RuntimeError
         fake_module.TimeoutError = TimeoutError
         worker = control._GuiWorker()
-        with mock.patch.dict(sys.modules, {"playwright.sync_api": fake_module}), \\
+        with mock.patch.dict(sys.modules, {"playwright.sync_api": fake_module}), \
              mock.patch.object(control, "_run_connected", return_value={"ok": True}):
             one = worker.submit("http://127.0.0.1:9223", TARGET, "click",
                                 {"selector": "#first"}, lambda: [])
