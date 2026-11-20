@@ -144,8 +144,9 @@ def _restriction_reason(url: str, text: str) -> str | None:
     if host.endswith(".naver.com") and (
         "쇼핑 서비스 접속이 일시적으로 제한되었습니다." in text
         or "검색 서비스 이용이 제한되었습니다." in text
+        or "Please complete the security verification." in text
     ):
-        return "네이버의 접속 제한 안내가 표시됨"
+        return "네이버의 접속 제한 또는 사용자 확인 안내가 표시됨"
     if (host == "google.com" or host.endswith(".google.com")) and (
         parsed.path.startswith("/sorry/")
         or "Our systems have detected unusual traffic from your computer network" in text
@@ -462,7 +463,10 @@ def browser_wait_for(selector: str | None = None, text: str | None = None,
                   ready_state:document.readyState,matched:matched,
                   access_text:visibleText.slice(0,2000)};
         })()""" % (
-            "!!document.querySelector(" + json.dumps(selector) + ")"
+            "(function(){var el=document.querySelector(" + json.dumps(selector)
+            + ");if(!el)return false;var rect=el.getBoundingClientRect();"
+            + "var style=getComputedStyle(el);return rect.width>0&&rect.height>0"
+            + "&&style.display!=='none'&&style.visibility!=='hidden';})()"
             if selector is not None else
             "visibleText.includes(" + json.dumps(text) + ")"
             if text is not None else
