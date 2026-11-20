@@ -69,7 +69,7 @@ class IsolatedRoutingTests(unittest.TestCase):
                  patch.object(SessionPool, "_port_available", return_value=True), \
                  patch.object(manager, "_reachable",
                               side_effect=[False, True, False, True]):
-                url, key = manager.acquire("issuer:alice")
+                _url, key = manager.acquire("issuer:alice")
                 first = manager.pool._sessions[key]
                 first.last_used = time.monotonic() - 60
                 manager.reap()
@@ -84,7 +84,10 @@ class IsolatedRoutingTests(unittest.TestCase):
                 self.assertTrue(first.profile_dir.exists())
                 url2, key2 = manager.acquire("issuer:alice")
                 self.assertEqual(key, key2)
-                self.assertEqual(url, url2)
+                self.assertEqual(
+                    url2,
+                    f"http://127.0.0.1:{manager.pool._sessions[key2].port + 200}/mcp",
+                )
                 self.assertEqual(manager.pool._sessions[key].profile_dir,
                                  first.profile_dir)
                 self.assertIsNot(manager.pool._sessions[key].process, first.process)
