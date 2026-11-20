@@ -56,53 +56,25 @@ try:
     if not png.startswith(b"\x89PNG\r\n\x1a\n"):
         raise RuntimeError("Returned image content is not PNG")
     if not texts:
-        raise RuntimeError("Missing saved file metadata")
+        raise RuntimeError("Missing screenshot metadata")
     metadata = json.loads(texts[0]["text"])
-    if metadata.get("bytes") != len(png) or not metadata.get("saved_path"):
-        raise RuntimeError("Image/file metadata mismatch")
-    # Verify the gateway serves the same bytes. Never print the capability URL.
-    from urllib.parse import urlsplit
+    if metadata.get("bytes") != len(png) or metadata.get("mime_type") != "image/png":
+        raise RuntimeError("MCP screenshot metadata mismatch")
+    if "download_url" in metadata or "saved_path" in metadata:
+        raise RuntimeError("Legacy server screenshot download metadata must not be returned")
     from urllib.request import urlopen
-    download_url = metadata.get("download_url", "")
-    parsed = urlsplit(download_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.path.startswith("/captures/hb-"):
-        raise RuntimeError("Missing valid screenshot download URL")
-    if metadata.get("expires_in_seconds") != 600:
-        raise RuntimeError("Unexpected screenshot link expiration")
-    local_url = "http://127.0.0.1:8790" + parsed.path
-    with urlopen(local_url, timeout=10) as response:
-        downloaded = response.read(8 * 1024 * 1024 + 1)
-        if response.status != 200 or response.headers.get_content_type() != "image/png":
-            raise RuntimeError("Screenshot download did not return HTTP 200 PNG")
-    if downloaded != png:
-        raise RuntimeError("Downloaded screenshot differs from inline MCP PNG")
-    # Also exercise Caddy. The loopback gateway can succeed while an obsolete
-    # Caddyfile still denies /captures/* with HTTP 403.
-    import subprocess
-    import tempfile
-    from pathlib import Path
+    # Caddy must no longer expose any public screenshot endpoint.
     caddy_config = (ROOT / "runtime/caddy/Caddyfile").read_text()
-    caddy_site = caddy_config.splitlines()[0].strip()
-    if 'handle /captures/*' not in caddy_config:
-        raise RuntimeError("Caddy screenshot route is absent")
-    with tempfile.TemporaryDirectory() as tmp:
-        output = str(Path(tmp) / "screenshot.png")
-        curl_args = ["curl", "--noproxy", "*", "--fail", "--silent", "--show-error",
-                     "--max-time", "15", "--output", output]
-        if caddy_site.startswith(":8088"):
-            # Local/external mode: the public TLS proxy forwards to host port 8088.
-            curl_args += ["--header", f"Host: {parsed.netloc}",
-                          "http://127.0.0.1:8088" + parsed.path]
-        else:
-            # Public mode: exercise the localhost TLS listener with correct SNI.
-            if parsed.scheme != "https" or not parsed.hostname:
-                raise RuntimeError("Invalid public screenshot URL")
-            curl_args += ["--resolve", f"{parsed.hostname}:443:127.0.0.1",
-                          download_url]
-        check = subprocess.run(curl_args, capture_output=True, text=True, timeout=20)
-        if check.returncode != 0 or not Path(output).exists() or Path(output).read_bytes() != png:
-            raise RuntimeError("Caddy screenshot download check failed")
-    print(f"[PASS] hackbrowser/browser_screenshot inline + gateway + Caddy PNG ({len(png)} bytes)")
+    if "handle /captures/*" in caddy_config:
+        raise RuntimeError("Legacy public screenshot path is still exposed")
+    from urllib.error import HTTPError
+    try:
+        with urlopen("http://127.0.0.1:8790/captures/deprecated.png", timeout=5) as unused:
+            raise RuntimeError(f"Legacy screenshot endpoint unexpectedly returned {unused.status}")
+    except HTTPError as response:
+        if response.code not in (403, 404):
+            raise RuntimeError(f"Legacy screenshot endpoint returned unexpected {response.code}")
+    print(f"[PASS] hackbrowser/browser_screenshot inline PNG only ({len(png)} bytes)")
 except Exception as exc:
     errors.append(f"hackbrowser/browser_screenshot: {exc}")
     print(f"[FAIL] hackbrowser/browser_screenshot: {exc}")

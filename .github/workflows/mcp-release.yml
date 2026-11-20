@@ -55,6 +55,7 @@ jobs:
           set -euo pipefail
           ruff check --select E4,E7,E9,F .
           python scripts/check_widget_js.py
+          node scripts/test_widget_download.mjs
       - name: Run CI tests and capture real output
         working-directory: MCP-Deployment
         run: |

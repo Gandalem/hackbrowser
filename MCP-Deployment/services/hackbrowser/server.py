@@ -9,7 +9,6 @@ import base64
 import binascii
 import json
 import os
-import secrets
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -24,8 +23,6 @@ CDP_PORT = int(os.environ.get("HACKBROWSER_CDP_PORT", "9222"))
 MCP_PORT = int(os.environ.get("HACKBROWSER_MCP_PORT", "8765"))
 CDP_HOST = "127.0.0.1"
 CDP_ROOT = f"http://{CDP_HOST}:{CDP_PORT}"
-SCREENSHOT_DIR = Path(os.environ.get("HACKBROWSER_SCREENSHOT_DIR", str(Path.home() / "hackbrowser-mcp-screenshots")))
-PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 SCREENSHOT_UI_URI = "ui://hackbrowser/screenshot.html"
@@ -229,7 +226,7 @@ def browser_fill(selector: str, value: str, target_id: str | None = None) -> dic
 
 @mcp.tool(meta={"ui": {"resourceUri": SCREENSHOT_UI_URI}, "openai/outputTemplate": SCREENSHOT_UI_URI})
 def browser_screenshot(target_id: str | None = None) -> list[TextContent | ImageContent]:
-    """Capture a PNG with MCP Apps preview. Do not embed the expiring download URL as a second image."""
+    """Capture a PNG and return it directly to the MCP Apps inline viewer."""
     result = _cdp("Page.captureScreenshot", {"format": "png"}, target_id)
     encoded = result.get("data")
     if not isinstance(encoded, str) or not encoded:
@@ -246,19 +243,7 @@ def browser_screenshot(target_id: str | None = None) -> list[TextContent | Image
     if len(png) > MAX_SCREENSHOT_BYTES:
         raise RuntimeError("Screenshot exceeds the 8 MiB limit")
 
-    SCREENSHOT_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-    # 192 bits of entropy make the short-lived download URL unguessable.
-    filename = f"hb-{secrets.token_hex(24)}.png"
-    output = SCREENSHOT_DIR / filename
-    # Create a private file and never overwrite an earlier capture.
-    fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "wb") as capture:
-        capture.write(png)
-
-    metadata = {"saved_path": str(output), "bytes": len(png), "mime_type": "image/png"}
-    if PUBLIC_BASE_URL:
-        metadata["download_url"] = f"{PUBLIC_BASE_URL}/captures/{filename}"
-        metadata["expires_in_seconds"] = 600
+    metadata = {"bytes": len(png), "mime_type": "image/png"}
     return [
         TextContent(type="text", text=json.dumps(metadata)),
         ImageContent(type="image", data=encoded, mime_type="image/png"),

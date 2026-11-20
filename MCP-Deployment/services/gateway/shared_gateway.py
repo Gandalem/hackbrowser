@@ -12,7 +12,6 @@ from pathlib import Path
 
 import aiohttp
 from aiohttp import web
-from screenshot_download import download_screenshot
 
 ROOT = Path(os.environ.get("MCP_INSTALL_ROOT", "/opt/mcp-deployment"))
 CONFIG = ROOT / "runtime/secrets/share.json"
@@ -99,7 +98,6 @@ async def lifespan(app):
 app = web.Application(client_max_size=16 * 1024 * 1024)
 app.cleanup_ctx.append(lifespan)
 app.router.add_get("/internal-health", health)
-app.router.add_get("/captures/{capture_id}", download_screenshot)
 app.router.add_route("*", "/share/{token}/{service}/mcp", proxy)
 
 if __name__ == "__main__":
