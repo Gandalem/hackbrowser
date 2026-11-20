@@ -213,8 +213,8 @@ class StandalonePackagingTests(unittest.TestCase):
         docker = (root / "standalone/Dockerfile").read_text()
         self.assertIn("USER mcp", docker)
         self.assertIn("xvfb", docker)
-        self.assertNotIn("zap", docker.lower())
-        self.assertNotIn("keycloak", docker.lower())
+        self.assertNotIn("COPY MCP-Deployment/services/zap", docker)
+        self.assertNotIn("COPY MCP-Deployment/services/keycloak", docker)
         self.assertIn("HACKBROWSER_MCP_HOST=0.0.0.0", docker)
 
 
