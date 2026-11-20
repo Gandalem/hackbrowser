@@ -69,7 +69,19 @@ class SourceTests(unittest.TestCase):
             and any(isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
                     and d.func.attr == "tool" for d in node.decorator_list)
         ]
-        self.assertEqual(len(exported), 8)
+        # Screenshot is provided through the MCP Apps extension, while the
+        # other seven actions remain ordinary MCP tools.
+        app_exported = [
+            node.name for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and any(isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                    and isinstance(d.func.value, ast.Name)
+                    and d.func.value.id == "apps" and d.func.attr == "tool"
+                    for d in node.decorator_list)
+        ]
+        self.assertEqual(len(exported), 7)
+        self.assertEqual(app_exported, ["browser_screenshot"])
+        self.assertEqual(len(exported) + len(app_exported), 8)
 
     def test_caddy_modes(self):
         for mode, public, oauth, site in (
