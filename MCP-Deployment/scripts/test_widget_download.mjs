@@ -74,7 +74,8 @@ window.onMessage({
   source: parent,
   data: {
     jsonrpc: "2.0", id: 1,
-    result: { protocolVersion: "2026-01-26", hostCapabilities: { downloadFile: {} } },
+    result: { protocolVersion: "2026-01-26", hostCapabilities: { downloadFile: {}, serverTools: {} },
+      hostContext: { toolInfo: { tool: { name: "hackbrowser__browser_screenshot" } } } },
   },
 });
 const png = Buffer.from("89504e470d0a1a0a", "hex");
@@ -126,7 +127,7 @@ elements.get("preview").click({ clientX: 300, clientY: 200 });
 assert.equal(elements.get("verification-submit").disabled, false);
 await elements.get("verification-submit").click();
 const request2 = sent.find(message => message.method === "tools/call");
-assert.equal(request2.params.name, "browser_submit_verification");
+assert.equal(request2.params.name, "hackbrowser__browser_submit_verification");
 assert.equal(request2.params.arguments.verification_id, "session-one-time");
 assert.equal(request2.params.arguments.answer, "1234");
 assert.equal(request2.params.arguments.input_x, 200);
@@ -138,5 +139,14 @@ assert.equal(elements.get("verification-submit").disabled, true);
 assert.ok(html.includes("browser_verification_click"), "manual CAPTCHA tile click handler missing");
 assert.ok(html.includes("browser_screenshot"), "manual CAPTCHA screenshot refresh missing");
 assert.ok(html.includes("sendFollowUpMessage"), "resume-agent fallback missing");
+const normalizedMissing = vm.runInContext(
+  'friendlyToolError(new Error("MCP Resource not found")).message', context);
+assert.match(normalizedMissing, /HackBrowser/);
+assert.match(normalizedMissing, /새로고침/);
+const toolError = vm.runInContext(
+  'toolFailure({isError:true, content:[{type:"text",text:"MCP Resource not found"}]})',
+  context);
+assert.equal(toolError, "MCP Resource not found");
+console.log("MCP Apps prefixed tool dispatch and stale-tool diagnostic: PASS");
 console.log("MCP Apps manual CAPTCHA card tool submission: PASS");
 console.log("MCP Apps host-mediated PNG download: PASS");
