@@ -115,18 +115,15 @@ class GuiActionTests(unittest.TestCase):
 
     def _run(self, action, args, tabs=None, page=None):
         page = page or FakePage()
-        fake = FakePlaywright(FakeBrowser(page))
-        pw_module = types.ModuleType("playwright.sync_api")
-        pw_module.sync_playwright = lambda: fake
-        pw_module.Error = RuntimeError
-        pw_module.TimeoutError = TimeoutError
+        browser = FakeBrowser(page)
         list_targets = mock.Mock(side_effect=[
             [{"id": "gui-tab", "url": TARGET["url"]}],
             [{"id": "gui-tab", "url": TARGET["url"]}] + (tabs or []),
         ])
-        with mock.patch.dict(sys.modules, {"playwright.sync_api": pw_module}):
-            output = control.run_action(
-                "http://127.0.0.1:9223", TARGET, action, args, list_targets,
+        with mock.patch.object(control.time, "monotonic",
+                               side_effect=[0.0, 2.5, 3.0, 4.0, 5.0, 6.0, 7.0]):
+            output = control._run_connected(
+                browser, TARGET, action, args, list_targets,
             )
         return output, page, list_targets
 
@@ -189,6 +186,36 @@ class GuiActionTests(unittest.TestCase):
         page.url = "https://another.example.org"
         with self.assertRaisesRegex(RuntimeError, "Cannot uniquely"):
             control._find_page(context, TARGET)
+
+    def test_worker_reuses_existing_cdp_across_two_actions(self):
+        page = FakePage()
+        browser = FakeBrowser(page)
+        browser.is_connected = lambda: True
+        connects = []
+        class FakeDriver:
+            chromium = types.SimpleNamespace(connect_over_cdp=lambda *a, **k: (
+                connects.append(1) or browser
+            ))
+        driver = FakeDriver()
+        class DriverContext:
+            def __enter__(self):
+                return driver
+            def __exit__(self, *args):
+                pass
+        fake_module = types.ModuleType("playwright.sync_api")
+        fake_module.sync_playwright = lambda: DriverContext()
+        fake_module.Error = RuntimeError
+        fake_module.TimeoutError = TimeoutError
+        worker = control._GuiWorker()
+        with mock.patch.dict(sys.modules, {"playwright.sync_api": fake_module}), \\
+             mock.patch.object(control, "_run_connected", return_value={"ok": True}):
+            one = worker.submit("http://127.0.0.1:9223", TARGET, "click",
+                                {"selector": "#first"}, lambda: [])
+            two = worker.submit("http://127.0.0.1:9223", TARGET, "click",
+                                {"selector": "#second"}, lambda: [])
+        self.assertTrue(one["ok"])
+        self.assertTrue(two["ok"])
+        self.assertEqual(len(connects), 1)
 
     def test_server_routes_click_without_javascript_click(self):
         with mock.patch.object(server, "_target", return_value=TARGET), \
