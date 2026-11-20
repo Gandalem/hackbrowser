@@ -246,6 +246,12 @@ class _GuiWorker:
         self.lock = threading.Lock()
         self.thread = None
         self.started = 0
+        # Module must also load when CI imports this file directly by path.
+        import sys
+        from pathlib import Path
+        folder = str(Path(__file__).resolve().parent)
+        if folder not in sys.path:
+            sys.path.insert(0, folder)
         from semantic_browser import SemanticBrowser
         self.semantic = SemanticBrowser()
 
