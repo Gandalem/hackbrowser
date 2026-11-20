@@ -84,7 +84,12 @@ def request(url, method="GET", data=None, token=None, form=False, timeout=25):
     try:
         with OPEN.open(req, timeout=timeout) as response:
             body = response.read(15_000_000)
-            return response.status, json.loads(body) if body else None
+            if not body:
+                return response.status, None
+            try:
+                return response.status, json.loads(body)
+            except ValueError:
+                return response.status, body.decode(errors="replace")
     except HTTPError as exc:
         return exc.code, None
 
