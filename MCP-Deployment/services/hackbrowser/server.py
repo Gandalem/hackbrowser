@@ -158,34 +158,43 @@ def _restriction_reason(url: str, text: str) -> str | None:
     return None
 
 
+def _site_key(host: str) -> str:
+    """Treat Naver Shopping's home and search subdomains as one rate-limit scope."""
+    if host == "shopping.naver.com" or host.endswith(".shopping.naver.com"):
+        return "shopping.naver.com"
+    return host
+
+
 def _record_restriction(url: str) -> int:
     host = urlsplit(url).hostname
     if not host:
         return 0
+    key = _site_key(host)
     with _access_lock:
         end = time.monotonic() + ACCESS_COOLDOWN_SECONDS
-        _restricted_until[host] = max(end, _restricted_until.get(host, 0.0))
+        _restricted_until[key] = max(end, _restricted_until.get(key, 0.0))
     return ACCESS_COOLDOWN_SECONDS
 
 
 def _pace_navigation(host: str) -> None:
     """Reserve a non-burst navigation slot; never retry a denied origin."""
+    key = _site_key(host)
     with _access_lock:
         now = time.monotonic()
-        remaining = _restricted_until.get(host, 0.0) - now
+        remaining = _restricted_until.get(key, 0.0) - now
         if remaining > 0:
             raise RuntimeError(
                 f"{host}: 접속 제한이 확인되어 재요청을 중단했습니다 "
                 f"(남은 대기 {int(remaining) + 1}초). 차단 우회 대신 사이트의 "
                 "공식 확인·고객센터 절차를 이용하세요."
             )
-        delay = max(0.0, _next_navigation_at.get(host, now) - now)
-        _next_navigation_at[host] = now + delay + MIN_NAVIGATION_INTERVAL_SECONDS
+        delay = max(0.0, _next_navigation_at.get(key, now) - now)
+        _next_navigation_at[key] = now + delay + MIN_NAVIGATION_INTERVAL_SECONDS
     if delay:
         time.sleep(delay)
     # A concurrent tool call may have detected a restriction while we waited.
     with _access_lock:
-        remaining = _restricted_until.get(host, 0.0) - time.monotonic()
+        remaining = _restricted_until.get(key, 0.0) - time.monotonic()
         if remaining > 0:
             raise RuntimeError(
                 f"{host}: 접속 제한을 확인해 페이지 이동을 중단했습니다 "
