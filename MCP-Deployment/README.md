@@ -141,6 +141,9 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 ## Playwright GUI 조작 엔진
 
+좌표 클릭 도구는 Playwright Python `mouse.click(x, y)`를 사용하며, 뷰포트 바깥 좌표는 거부합니다. 텍스트가 여러 요소에 중복 매칭되면 첫 요소를 임의로 클릭하지 않고 `ok:false`와 일치 개수를 반환합니다. 텍스트 클릭 실패 시 `browser_elements`에서 특정 CSS 선택자를 확인하세요.
+
+
 Playwright는 **이미 실행 중인 GUI Chromium의 로컬 CDP 9223**에만 연결합니다. 새 브라우저/프로필을 생성하거나 로그인 쿠키를 초기화하지 않습니다. 기존 13개 도구는 유지하고, 아래 도구 3개가 추가되어 HackBrowser는 총 16개입니다.
 
 - `browser_click`: Playwright 실제 클릭, 동작 가능 여부 대기, URL/새 탭 감지
