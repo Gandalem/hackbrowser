@@ -1,0 +1,122 @@
+name: One-time beta.3 human GUI handoff smoke
+on:
+  push:
+    branches: [master]
+    paths: [".github/workflows/one-time-beta3-handoff-smoke.yml"]
+permissions:
+  contents: read
+jobs:
+  smoke:
+    if: github.repository == 'Gandalem/hackbrowser'
+    runs-on: ubuntu-24.04
+    environment: oci-production
+    concurrency:
+      group: oci-mcp-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Validate takeover and return on a disposable GUI tab
+        env:
+          DEPLOY_HOST: ${{ secrets.OCI_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.OCI_SSH_USER }}
+          DEPLOY_KEY: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+          DEPLOY_HOST_KEYS: ${{ secrets.OCI_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_KEY" && test -n "$DEPLOY_HOST_KEYS"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" | tr -d '\r' > "$HOME/.ssh/id_ci_deploy"
+          printf '%s\n' "$DEPLOY_HOST_KEYS" | tr -d '\r' > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ci_deploy" "$HOME/.ssh/known_hosts"
+          trap 'rm -f "$HOME/.ssh/id_ci_deploy"' EXIT
+          ssh -i "$HOME/.ssh/id_ci_deploy" -o BatchMode=yes \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          sudo -n -u mcpstack /opt/mcp-deployment/runtime/venv-hackbrowser/bin/python - <<'PY'
+          import json
+          import sys
+          import time
+          sys.path.insert(0, "/opt/mcp-deployment/services/hackbrowser")
+          import server
+
+          original = {item["target_id"] for item in server.browser_tabs()}
+          result = server._browser_cdp("Target.createTarget", {"url": "about:blank"})
+          target_id = result["targetId"]
+          token = None
+          try:
+              html = """
+              (() => {
+                document.body.innerHTML = '<button id="manual" style="position:absolute;left:10px;top:10px;width:190px;height:70px">More</button><span id="result">0</span>';
+                document.getElementById('manual').onclick = () =>
+                  document.getElementById('result').textContent =
+                  String(Number(document.getElementById('result').textContent) + 1);
+                return true;
+              })()
+              """
+              for i in range(20):
+                  try:
+                      assert server._evaluate(html, target_id) is True
+                      break
+                  except Exception:
+                      if i == 19:
+                          raise
+                      time.sleep(0.2)
+
+              session = server.browser_handoff_begin(target_id)
+              token = session["control_token"]
+              assert server.browser_handoff_status()["active"] is True
+              assert "control_token" not in server.browser_handoff_status()
+              screenshot = server.browser_screenshot(target_id)
+              metadata = json.loads(screenshot[0].text)
+              assert metadata["handoff"]["active"] is True
+              assert token not in str(metadata)
+              try:
+                  server.browser_click("#manual", target_id)
+              except RuntimeError as exc:
+                  assert "Manual control" in str(exc)
+              else:
+                  raise AssertionError("AI browser click was not blocked")
+              try:
+                  server.browser_scroll("down", 100, target_id=target_id)
+              except RuntimeError as exc:
+                  assert "Manual control" in str(exc)
+              else:
+                  raise AssertionError("AI scroll was not blocked")
+              assert server._evaluate(
+                  "document.getElementById('result').textContent", target_id
+              ) == "0"
+              clicked = server.browser_handoff_input(
+                  token, target_id, "click", x=75, y=35
+              )
+              assert clicked["ok"]
+              assert server._evaluate(
+                  "document.getElementById('result').textContent", target_id
+              ) == "1", "Manual click did not change the actual GUI DOM"
+              scrolled = server.browser_handoff_input(
+                  token, target_id, "scroll_down", pixels=200
+              )
+              assert scrolled["ok"]
+              assert server.browser_handoff_end(token)["returned_to_ai"]
+              token = None
+              assert not server.browser_handoff_status()["active"]
+              ai = server.browser_click("#manual", target_id)
+              assert ai.get("ok"), ai
+              assert server._evaluate(
+                  "document.getElementById('result').textContent", target_id
+              ) == "2"
+              print("PASS: takeover blocks AI click and scroll, screenshot remains available")
+              print("PASS: user one-click/scroll updates existing GUI, AI resumes after return")
+              print("PASS: handoff capability never appears in status/screenshot metadata")
+          finally:
+              if token is not None:
+                  try:
+                      server.browser_handoff_end(token)
+                  except Exception:
+                      pass
+              server._browser_cdp("Target.closeTarget", {"targetId": target_id})
+          current = {item["target_id"] for item in server.browser_tabs()}
+          assert current == original, "An original GUI tab was modified or removed"
+          print("PASS: original GUI tabs preserved")
+          PY
+          REMOTE
