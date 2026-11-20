@@ -548,6 +548,10 @@ def browser_handoff_begin(target_id: str) -> dict:
     if selected.get("type") != "page":
         raise ValueError("Manual control requires a regular GUI browser tab")
     with _manual_handoff.lock:
+        if _verification_state(selected["id"]).get("verification_reason"):
+            raise RuntimeError(
+                "Use the existing CAPTCHA card for manual verification"
+            )
         viewport = _evaluate(
             "({width: innerWidth, height: innerHeight})", selected["id"]
         )
