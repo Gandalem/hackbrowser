@@ -6,6 +6,7 @@ This helper never solves challenges, modifies profiles, or opens external CDP po
 from __future__ import annotations
 
 from urllib.parse import urlsplit
+import os
 import queue
 import threading
 import time
