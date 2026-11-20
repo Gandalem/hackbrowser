@@ -30,7 +30,9 @@ from handoff import manual_handoff as _manual_handoff
 
 _handoff_input_local = threading.local()
 
-CDP_PORT = 9223
+CDP_PORT = int(os.environ.get("HACKBROWSER_CDP_PORT", "9223"))
+if not 1024 <= CDP_PORT <= 65535:
+    raise ValueError("Invalid HACKBROWSER_CDP_PORT")
 MCP_PORT = int(os.environ.get("HACKBROWSER_MCP_PORT", "8765"))
 CDP_HOST = "127.0.0.1"
 CDP_ROOT = f"http://{CDP_HOST}:{CDP_PORT}"
