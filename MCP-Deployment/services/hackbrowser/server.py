@@ -921,7 +921,9 @@ def browser_scroll(direction: str = "down", pixels: int = 600,
         },90);
       });
     })()""" % (json.dumps(selector is not None), json.dumps(selector), axis, amount)
-    result = _evaluate(expression, target["id"], await_promise=True)
+    with _manual_handoff.lock:
+        _manual_handoff.assert_ai_allowed()
+        result = _evaluate(expression, target["id"], await_promise=True)
     return result if isinstance(result, dict) else {"result": result}
 
 
@@ -1071,12 +1073,15 @@ def browser_screenshot(target_id: str | None = None) -> list[TextContent | Image
 
 
 def _click_at(target_id: str, x: int, y: int) -> None:
-    """Use page coordinates so a human-selected input in an iframe can be focused."""
-    for event_type in ("mousePressed", "mouseReleased"):
-        _cdp("Input.dispatchMouseEvent", {
-            "type": event_type, "x": x, "y": y, "button": "left",
-            "clickCount": 1,
-        }, target_id)
+    """Serialize both mouse events against any takeover transition."""
+    with _manual_handoff.lock:
+        if not getattr(_handoff_input_local, "user_authorized", False):
+            _manual_handoff.assert_ai_allowed()
+        for event_type in ("mousePressed", "mouseReleased"):
+            _cdp("Input.dispatchMouseEvent", {
+                "type": event_type, "x": x, "y": y, "button": "left",
+                "clickCount": 1,
+            }, target_id)
 
 
 @mcp.tool()
