@@ -65,7 +65,7 @@ HTTPS + OAuth 설치 시 ChatGPT에 등록할 주소:
 
 OAuth 공개 클라이언트로 **Client Secret 없이 PKCE S256**을 사용합니다. 로그인 계정은 기본 `mcp-operator`; 최초 비밀번호는 서버의 `runtime/private.env`에 생성됩니다.
 
-> `access-urls.txt`의 공유 URL은 비밀번호와 동일하게 보호하세요. CDP 9222, ZAP 8282, Keycloak 8081 등 내부 포트를 공개하지 마세요.
+> `access-urls.txt`의 공유 URL은 비밀번호와 동일하게 보호하세요. GUI CDP 9223, ZAP 8282, Keycloak 8081 등 내부 포트를 공개하지 마세요.
 
 ## 사용·운영 문서
 
