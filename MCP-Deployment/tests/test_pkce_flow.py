@@ -3,6 +3,8 @@ import hashlib
 import importlib.util
 import unittest
 from pathlib import Path
+from http.cookiejar import Cookie
+from urllib.request import Request
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/keycloak_pkce.py"
 spec = importlib.util.spec_from_file_location("isolated_pkce_helper", SCRIPT)
@@ -29,6 +31,49 @@ class PKCEHelperTests(unittest.TestCase):
         )
         self.assertEqual(parser.hidden, {"session_code": "abc"})
         self.assertIn("login-actions", parser.action)
+
+    def test_secure_keycloak_cookie_survives_http_loopback(self):
+        # Keycloak can mark cookies Secure behind its HTTPS hostname.
+        # The smoke helper must still send them to the internal HTTP login.
+        jar = mod._loopback_cookie_jar()
+        cookie = Cookie(
+            version=0, name="AUTH_SESSION_ID", value="test-opaque",
+            port=None, port_specified=False, domain="127.0.0.1",
+            domain_specified=False, domain_initial_dot=False,
+            path="/auth", path_specified=True, secure=True,
+            expires=None, discard=True, comment=None, comment_url=None,
+            rest={}, rfc2109=False,
+        )
+        jar.set_cookie(cookie)
+        request = Request(
+            "http://127.0.0.1:8081/auth/realms/security-mcp/login-actions/authenticate"
+        )
+        jar.add_cookie_header(request)
+        self.assertIn("AUTH_SESSION_ID=test-opaque", request.get_header("Cookie", ""))
+        unrelated = Request("http://127.0.0.1:8081/unrelated")
+        jar.add_cookie_header(unrelated)
+        self.assertIsNone(unrelated.get_header("Cookie"))
+
+    def test_pkce_helper_rejects_non_loopback_transport(self):
+        base = {
+            "base_url": "http://127.0.0.1:8081/auth",
+            "public_base": "https://site.test",
+            "realm": "security-mcp",
+            "client_id": "test-client",
+            "redirect_uri": "http://127.0.0.1:23232/callback",
+            "username": "test-user",
+            "password": "test-secret",
+        }
+        for changed in (
+            {"base_url": "http://site.test:8081/auth"},
+            {"base_url": "https://127.0.0.1:8081/auth"},
+            {"redirect_uri": "http://127.0.0.1.evil.test:23232/callback"},
+            {"redirect_uri": "https://127.0.0.1:23232/callback"},
+            {"redirect_uri": "http://127.0.0.1:23232@evil.test/callback"},
+        ):
+            with self.subTest(changed=changed):
+                with self.assertRaises(ValueError):
+                    mod.authorization_code(**{**base, **changed})
 
     def test_login_url_only_allows_expected_realm_and_origin(self):
         kwargs = {"base_url": "http://127.0.0.1:8081/auth",
