@@ -1,77 +1,81 @@
-<div align="center">
-  <img src="./assets/mcp-deployment-banner.svg" alt="MCP Deployment" width="100%" />
-</div>
+# HackBrowser MCP
 
-# MCP Deployment
+**Your AI browser. Your server. Your control.**
 
-Ubuntu/Debian 서버에 **PocMap · HackBrowser · OWASP ZAP** MCP를 설치하고 ChatGPT와 연결하는 통합 패키지입니다. Docker·systemd 기반이며 OCI, AWS, NCP, 일반 VM/VPS에서 사용할 수 있습니다.
+A self-hosted **GUI Chromium browser** for MCP agents. Let an AI browse real pages via Playwright and CDP, view screenshots in ChatGPT, and pause when a person needs to handle a login or verification. No remote browser-cloud account required.
 
-| MCP | 주요 기능 | 도구 수 |
+> **Public beta:** Works with an existing GUI Chromium instance on Linux. The local Docker path below is new and requires runtime validation on your host. The project does not yet offer isolated multi-user sessions or fully automatic CAPTCHA handoff.
+
+[Standalone browser](standalone/README.md) · [Full server + OAuth](MCP-Deployment/README.md) · [MCP tools](docs/TOOLS.md) · [Demo walkthrough](docs/DEMO.md) · [Releases](https://github.com/Gandalem/hackbrowser/releases)
+
+## What makes it useful?
+
+| | Feature | How it helps |
+|---|---|---|
+| 1 | **Real GUI Chromium in a CLI server** | Xvfb renders a real GUI browser without a physical monitor; Playwright connects through local CDP |
+| 2 | **AI-friendly Observe → Act** | AI receives concise, numbered element references rather than long CSS selectors |
+| 3 | **Human-assisted verification** | Screenshot MCP App can relay manual CAPTCHA input or clicks, without automated solving |
+| 4 | **Conservative workflows** | Up to 8 safe browsing steps; pause on login/verification; explicit resume |
+| 5 | **Self-hosted** | Choose a local-only Docker browser or full Linux systemd/OAuth deployment |
+
+### Quickstart: browser only (Linux Docker)
+
+Requires Docker Engine, Compose plugin, and enough resources for GUI Chromium. **This standalone setup is intended for one local developer, not public deployment.**
+
+```bash
+git clone https://github.com/Gandalem/hackbrowser.git
+cd hackbrowser
+docker compose -f standalone/compose.yml up -d --build
+docker compose -f standalone/compose.yml ps
+```
+
+Configure a **local MCP client** to connect to `http://127.0.0.1:8765/mcp` using Streamable HTTP. The Docker host only publishes this port to its own loopback address. The GUI CDP port **9223 stays inside the container**.
+
+> **Security:** Local-only standalone MCP has no authentication. Do not publish or reverse-proxy its port to the Internet. Docker Chromium uses `--no-sandbox`, runs as non-root, and is not a security isolation boundary. For remote ChatGPT connections use the full HTTPS/OAuth deployment, not the standalone port.
+
+See [standalone setup and limitations](standalone/README.md).
+
+### Try with an AI
+
+Once your MCP client is connected, try:
+
+> Open the Wikipedia page about Gundam. Observe the page, use an element reference to follow a safe link, and return the page title and a screenshot.
+
+The agent can call `browser_navigate`, then `browser_observe`, then `browser_act` using a fresh `snapshot_id` and `ref`, and `browser_screenshot`. Element references expire after 90 seconds or a page change. Sensitive actions are denied by the semantic interface; advanced existing tools remain available for explicitly user-controlled operations.
+
+## ChatGPT and remote servers
+
+The **full MCP Deployment** installs three independent MCP backends and provides a reverse proxy and optional Keycloak OAuth:
+
+| MCP | Purpose | Tools |
 |---|---|---:|
-| **PocMap** | CVE·PoC·취약점 정보 조회 | 22 |
-| **HackBrowser** | Chromium AI 제어·화면 캡처·사용자 CAPTCHA 입력 | 12 |
-| **OWASP ZAP** | 웹 보안 점검·HTTP 기록·보고서 | 17 |
-
-[51개 도구 전체 보기](docs/TOOLS.md)
-
-## 빠른 설치
-
-**필수:** Ubuntu/Debian + systemd, `sudo`, 인터넷, 권장 RAM 8GB/디스크 15GB. 외부 ChatGPT 연동에는 HTTPS 주소가 필요합니다.
+| **HackBrowser** | GUI Chromium, screenshots, human verification, workflows, Observe/Act | **22** |
+| PocMap | CVE/PoC intelligence | 22 |
+| OWASP ZAP | Web security testing | 17 |
+| **Total** | | **61** |
 
 ```bash
 git clone https://github.com/Gandalem/hackbrowser.git
 cd hackbrowser/MCP-Deployment
+# Consult the full installation modes before proceeding:
+less README.md
 ```
 
-다음 중 환경에 맞는 **한 가지**를 실행합니다.
+Use the [full installation and authentication guide](MCP-Deployment/README.md) for Ubuntu/Debian, systemd, Caddy, Keycloak, existing server migration and OCI. This installer configures the whole suite; standalone Docker does **not**.
 
-**① 로컬 전용 (도메인 없음)**
+## Verified behavior and current limitations
 
-```bash
-sudo PUBLIC_BASE_URL=http://127.0.0.1:8088 \
-  CADDY_MODE=local ENABLE_OAUTH=0 SHARE_DAYS=7 bash install.sh
-```
+- Tested on an OCI GUI Chromium deployment: page navigation, clickable elements, new tabs, scrolling, screenshot and bounded workflow resume.
+- CI checks Python syntax, unit tests and MCP tool discovery. **Docker standalone has not yet been exercised on every supported CPU/OS combination.**
+- Semantic Observe/Act is new in this beta: it deliberately blocks unknown button actions, unsafe destinations and sensitive form input. Re-observe if a reference expires.
+- CAPTCHA/manual login is performed by a person. An end-to-end real CAPTCHA → workflow resume demonstration remains to be validated.
+- The full server currently **shares one GUI profile across authenticated MCP users**. Do not use it for multiple untrusted users.
+- Host permissions, sites' terms, sandbox configuration, authentication and network boundaries are still the operator's responsibility.
 
-**② 외부 HTTPS 주소가 이미 연결된 서버 (프록시/터널 사용)**
+## Contributing and source
 
-```bash
-sudo PUBLIC_BASE_URL=https://mcp.example.com \
-  CADDY_MODE=external ENABLE_OAUTH=1 SHARE_DAYS=7 bash install.sh
-```
+Bug reports and reproducible improvements are welcome. Include your OS, architecture, Chromium version, MCP client, redacted logs and a minimal reproduction. Never post tokens, credentials, private URLs or browser profiles.
 
-**③ 서버 Caddy가 HTTPS를 직접 처리하는 경우 (80/443 사용)**
+[Source provenance](MCP-Deployment/docs/PROVENANCE.md) · [License](LICENSE) · [Release/OCI CI](docs/RELEASE.md)
 
-```bash
-sudo PUBLIC_BASE_URL=https://mcp.example.com \
-  CADDY_MODE=public ENABLE_OAUTH=1 SHARE_DAYS=7 bash install.sh
-```
-
-`mcp.example.com`은 실제 도메인으로 변경하세요. 이미 설치된 서버의 도메인을 변경하려면 **재설치하지 말고** [서버 운영 가이드](MCP-Deployment/README.md#기존-서버에-외부-https-도메인-적용)를 사용하세요.
-
-## 연결 및 확인
-
-```bash
-sudo bash /opt/mcp-deployment/status.sh
-sudo cat /opt/mcp-deployment/runtime/access-urls.txt
-```
-
-HTTPS + OAuth 설치 시 ChatGPT에 등록할 주소:
-
-| 서비스 | MCP 서버 URL | OAuth Client ID |
-|---|---|---|
-| PocMap | `https://mcp.example.com/pocmap/mcp` | `chatgpt-pocmap` |
-| HackBrowser | `https://mcp.example.com/hackbrowser/mcp` | `chatgpt-hackbrowser` |
-| ZAP | `https://mcp.example.com/zap/mcp` | `chatgpt-zap` |
-
-OAuth 공개 클라이언트로 **Client Secret 없이 PKCE S256**을 사용합니다. 로그인 계정은 기본 `mcp-operator`; 최초 비밀번호는 서버의 `runtime/private.env`에 생성됩니다.
-
-> `access-urls.txt`의 공유 URL은 비밀번호와 동일하게 보호하세요. GUI CDP 9223, ZAP 8282, Keycloak 8081 등 내부 포트를 공개하지 마세요.
-
-## 사용·운영 문서
-
-- **[서버 운영 가이드](MCP-Deployment/README.md)** — 로그인 ID/초기 비밀번호 조회, 추가 사용자 생성, 외부 도메인 서버 설정, 상태 확인, 문제 해결
-- **[MCP 도구 목록](docs/TOOLS.md)** — 51개 도구별 기능·입력값
-- **[릴리스 및 OCI 자동 배포](docs/RELEASE.md)** — Git 태그, CI/CD, 배포 설정·검증
-- **[소스 출처·제약](MCP-Deployment/docs/PROVENANCE.md)** — 원본/재구성 범위 및 제한 사항
-
-**검증 범위:** 정적 테스트와 일부 운영 환경 검증이 수행되었으나, 새 VM에서 모든 클라우드 조합의 최초 설치가 검증된 것은 아닙니다.
+This repository packages a new MCP bridge alongside original and third-party components. Preserve original author credits and check upstream licenses before redistribution.
