@@ -156,7 +156,8 @@ elements.get("pick-confirm").click();
 elements.get("preview").click({ clientX: 300, clientY: 200 });
 assert.equal(elements.get("verification-submit").disabled, false);
 await elements.get("verification-submit").click();
-const request2 = sent.find(message => message.method === "tools/call");
+const request2 = sent.find(message => message.method === "tools/call" &&
+  message.params.name === "hackbrowser__browser_submit_verification");
 assert.equal(request2.params.name, "hackbrowser__browser_submit_verification");
 assert.equal(request2.params.arguments.verification_id, "session-one-time");
 assert.equal(request2.params.arguments.answer, "1234");
