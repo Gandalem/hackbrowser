@@ -59,7 +59,7 @@ restore existing behavior without deleting isolated user profile directories.
 
 - The OCI ARM64 synthetic-user smoke and two real Keycloak JWT staging-account
   routing test both passed. This does not prove hardened multi-tenant isolation;
-  interactive ChatGPT authorization-code/PKCE, idle cleanup, and hostile local
+  interactive ChatGPT authorization-code/PKCE, hostile local
   process isolation still require separate checks.
 - Isolated processes share the same Unix uid; for untrusted third parties use
   container/user-namespace boundaries and enforce per-process memory quotas.
@@ -119,7 +119,36 @@ On 2026-11-21 the user-provided OCI output reported **PASS** for real Keycloak
 JWT issuance, invalid/missing JWT denial, two account-specific browser/CDP
 routes, page/cookie isolation, PNG screenshots, foreign target/handoff token
 denial and third-user capacity refusal. The cleanup message reported only an
-attempt; independent cleanup audit remains pending.
+attempt; later read-only audit confirmed zero residual test users or clients.
+
+## OCI Keycloak Authorization Code + PKCE S256 staging test
+
+The staging test also supports a **real authorization-code login** through
+Keycloak's HTML login form, a random S256 PKCE verifier/challenge, a one-time
+code redirected to a loopback callback (intercepted without a listener), and
+a token exchange. It verifies the resulting signed JWT works through the
+**isolated staging gateway**, and that an incorrect verifier and the direct
+password grant are rejected.
+
+```bash
+cd ~/hb-isolation-test.nWOaei
+git pull --ff-only origin feat/isolated-browser-session-pool
+sudo /usr/bin/python3 MCP-Deployment/scripts/smoke_oauth_isolation.py --pkce
+sudo /usr/bin/python3 MCP-Deployment/scripts/smoke_oauth_isolation.py --verify-cleanup
+```
+
+The script temporarily creates three **disposable** accounts and one
+`hb-smoke-*` client configured with S256 PKCE. It does **not** modify the
+actual `chatgpt-hackbrowser` client or connect the ChatGPT app. Its
+public-hostname Keycloak login form links are rewritten to **localhost only**
+after validating the Keycloak realm and destination. No passwords, tokens, or
+authorization codes are printed. The test client and users are removed at
+exit, except on abnormal process termination. Audit remaining
+`hb-smoke-*` identities afterward.
+
+**Scope limitation:** successful local Keycloak authorization-code + PKCE does
+not prove ChatGPT's redirect registration, consent UI, token refresh, or
+external reverse-proxy session flow.
 
 ## OCI live idle/reconnect lifecycle smoke
 
@@ -136,7 +165,7 @@ CHROMIUM_BIN="$(command -v google-chrome-stable || command -v chromium || comman
   MCP-Deployment/scripts/smoke_session_lifecycle.py
 ```
 
-This test is not a real long-lived network SSE test: it verifies the backend
+The OCI live test passed browser idle termination and persistent-cookie restore\nfollowing graceful CDP Browser.close. This test is not a real long-lived\nnetwork SSE test: it verifies the backend
 lease mechanism, while a full streaming HTTP response, disconnect handling
 and reconnect across gateway restart need distinct live integration tests.
 It also does **not** validate ChatGPT's interactive OAuth PKCE redirect.
