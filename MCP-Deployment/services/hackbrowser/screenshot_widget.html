@@ -87,6 +87,7 @@
     let picking = null;
     let verificationSubmitting = false;
     let lastVerificationTarget = null;
+    let pausedWorkflowId = null;
     let continueRequested = false;
     let autoResumeOnConfirmed = false;
     let hostInitialized = false;
@@ -155,6 +156,9 @@
 
     function setupVerification(metadata) {
       const value = metadata?.verification;
+      pausedWorkflowId = typeof metadata?.paused_workflow?.workflow_id === "string"
+        ? metadata.paused_workflow.workflow_id : null;
+      lastVerificationTarget = metadata?.target_id || lastVerificationTarget;
       if (!value?.required || typeof value.id !== "string" ||
           !Number.isInteger(value.viewport?.width) ||
           !Number.isInteger(value.viewport?.height)) {
@@ -166,10 +170,10 @@
           verificationCard.hidden = false;
           verificationStatus.textContent = "reCAPTCHA 응답 토큰이 확인되었습니다. 다음 단계로 진행할 수 있습니다.";
           if (autoResumeOnConfirmed) void continueAgent();
-        } else if (lastVerificationTarget) {
+        } else if (pausedWorkflowId || lastVerificationTarget) {
           verificationCard.hidden = false;
           resumeAgent.hidden = false;
-          verificationStatus.textContent = "인증 화면이 보이지 않습니다. 성공 여부를 확인한 후 작업을 계속할 수 있습니다.";
+          verificationStatus.textContent = "인증 화면이 보이지 않습니다. 현재 페이지가 정상인지 확인한 뒤, 보류된 작업을 재개할 수 있습니다.";
         }
         return;
       }
@@ -280,7 +284,13 @@
       continueRequested = true;
       autoResumeOnConfirmed = false;
       resumeAgent.disabled = true;
-      const prompt = "HackBrowser에서 사용자가 CAPTCHA 확인을 완료했습니다. 현재 GUI Chromium 탭을 browser_tabs와 browser_page_text로 확인하고, 이전에 요청한 브라우저 작업을 계속하세요. 인증 성공을 가정하지 말고 화면 상태를 검증하세요. 필요하면 다시 사용자 인증을 요청하세요.";
+      const prompt = pausedWorkflowId
+        ? "사용자가 HackBrowser의 수동 인증을 마쳤습니다. browser_workflow_status 도구로 작업 " +
+          pausedWorkflowId + " 의 현재 상태를 확인하고 browser_tabs/browser_page_text로 " +
+          "인증 화면이 사라졌는지 검증하세요. 인증이 남아 있으면 다시 요청하고, " +
+          "완료된 경우에만 browser_workflow_resume(workflow_id='" + pausedWorkflowId +
+          "')로 다음 안전한 단계부터 재개하세요. 성공을 가정하거나 인증을 자동 해결하지 마세요."
+        : "HackBrowser에서 사용자가 CAPTCHA 확인을 완료했습니다. 현재 GUI Chromium 탭을 browser_tabs와 browser_page_text로 확인하고, 이전에 요청한 브라우저 작업을 계속하세요. 인증 성공을 가정하지 말고 화면 상태를 검증하세요. 필요하면 다시 사용자 인증을 요청하세요.";
       try {
         if (typeof window.openai?.sendFollowUpMessage === "function") {
           await window.openai.sendFollowUpMessage({ prompt });
