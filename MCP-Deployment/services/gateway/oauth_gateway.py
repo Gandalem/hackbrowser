@@ -118,7 +118,7 @@ async def proxy(request, service):
             if not isinstance(subject, str) or not subject.strip():
                 return challenge(service)
             backend, owner_key = await asyncio.to_thread(
-                request.app["isolated"].acquire, ISSUER + "\\x00" + subject,
+                request.app["isolated"].acquire, ISSUER + ":" + subject,
             )
         except (OSError, RuntimeError, ValueError):
             return web.Response(status=503, text="Isolated browser session unavailable")
