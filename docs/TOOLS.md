@@ -1,4 +1,4 @@
-# MCP 도구 레퍼런스 (PocMap 22 · HackBrowser 19 · ZAP 17)
+# MCP 도구 레퍼런스 (PocMap 22 · HackBrowser 20 · ZAP 17)
 
 [프로젝트 설치](../README.md) · [운영 및 계정 관리](../MCP-Deployment/README.md)
 
@@ -9,7 +9,7 @@
 | MCP | 기능 | 도구 |
 |---|---|---:|
 | **PocMap** | CVE·PoC·취약점 정보 조회 | 22개 |
-| **HackBrowser MCP** | Chromium 브라우저 제어 | 19개 |
+| **HackBrowser MCP** | Chromium 브라우저 제어 | 20개 |
 | **OWASP ZAP MCP** | 웹 진단·스캔·HTTP 이력·보고서 | 17개 |
 
 <details>
@@ -46,7 +46,7 @@
 </details>
 
 <details>
-<summary><b>HackBrowser MCP — Chromium 브라우저 제어 도구 19개</b></summary>
+<summary><b>HackBrowser MCP — Chromium 브라우저 제어 도구 20개</b></summary>
 
 | 도구 | 기능 | 주요 입력·참고 |
 |---|---|---|
@@ -120,3 +120,5 @@ sudo python3 /opt/mcp-deployment/scripts/check_calls.py
 - `browser_workflow_resume(workflow_id)`: 사용자 수동 인증 후 페이지 검증 및 다음 안전한 단계부터 재개
 - 결제·삭제·로그인 정보 입력·CAPTCHA 자동 해결은 실행하지 않음
 
+
+- `browser_close_tabs(target_ids, keep_one_blank=true)`: 지정한 GUI 페이지 탭을 닫으며, 전체 종료 시 빈 탭 하나로 Chromium을 유지
