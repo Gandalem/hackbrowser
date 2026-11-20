@@ -16,13 +16,16 @@ for (const name of ["preview", "status", "download", "details",
                    "verification-card", "verification-answer",
                    "verification-positions", "verification-status",
                    "verification-submit", "pick-input", "pick-confirm",
-                   "pick-tile", "refresh-verification", "resume-agent"]) {
+                   "pick-tile", "refresh-verification", "resume-agent",
+                   "live-toggle", "handoff-take", "handoff-return",
+                   "handoff-state", "handoff-scroll", "handoff-up", "handoff-down"]) {
   elements.set(name, {
     textContent: "", value: "",
     hidden: name === "verification-card",
     disabled: ["download", "verification-submit"].includes(name),
     style: { display: "none" },
-    classList: { add() {}, remove() {} },
+    classList: { add() {}, remove() {}, toggle() {} },
+    setAttribute() {}, naturalWidth: 1200, naturalHeight: 800,
     getBoundingClientRect() { return { left: 0, top: 0, width: 600, height: 400 }; },
     addEventListener(event, handler) { this[event] = handler; },
   });
@@ -56,12 +59,15 @@ const document = {
   body: { scrollHeight: 360 },
   documentElement: { style: { setProperty() {} } },
   getElementById(name) { return elements.get(name); },
+  addEventListener() {},
 };
 context = vm.createContext({
   window, document,
   requestAnimationFrame(callback) { callback(); },
   setTimeout() { return 1; },
   clearTimeout() {},
+  setInterval() { return 1; },
+  clearInterval() {},
   atob,
   File: class File { constructor(bytes, name, options) {
     this.name = name; this.bytes = bytes; this.type = options.type;
