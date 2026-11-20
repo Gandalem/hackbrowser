@@ -63,11 +63,10 @@ class PoolTests(unittest.TestCase):
                  patch.object(pool, "_request_browser_close", return_value=True) as close, \
                  patch("session_pool.os.killpg") as kill:
                 session = pool.acquire("alice")
-                # FakeProcess does not implement the real Browser.close shutdown:
-                # the timeout fallback still must terminate the process group.
+                # A graceful close lets the process exit before a signal is sent.
                 pool.release("alice")
                 close.assert_called_once_with(session)
-                kill.assert_called()
+                kill.assert_not_called()
                 self.assertTrue(process.exited)
 
     def test_browser_close_rejects_untrusted_websocket_endpoint(self):
