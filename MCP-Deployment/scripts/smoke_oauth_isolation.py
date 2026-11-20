@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""Run real Keycloak JWT -> staging gateway -> isolated browsers on OCI.
+
+Run with sudo from the PR checkout. The script reads root-only private.env
+without printing passwords/tokens; the staging gateway and browsers run as
+the unprivileged invoking user. The production OAuth gateway, MCP endpoint,
+Chromium and profiles remain untouched. All test realm users and client are
+deleted on exit, including assertion failures.
+"""
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import pwd
+import secrets
+import shlex
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode
+from urllib.request import ProxyHandler, Request, build_opener
+
+SOURCE = Path(__file__).resolve().parents[1]
+LIVE = Path("/opt/mcp-deployment")
+OPEN = build_opener(ProxyHandler({}))
+REALM = "security-mcp"
+MCP_HEADERS = {
+    "Content-Type": "application/json",
+    "Accept": "application/json, text/event-stream",
+    "MCP-Protocol-Version": "2026-07-28",
+}
+META = {
+    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+    "io.modelcontextprotocol/clientCapabilities": {},
+    "io.modelcontextprotocol/clientInfo": {"name": "oci-oauth-isolation-test", "version": "1.0"},
+}
+
+
+def request(url, method="GET", data=None, token=None, form=False, timeout=25):
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    if data is not None:
+        payload = (urlencode(data).encode() if form
+                   else json.dumps(data).encode())
+        headers["Content-Type"] = ("application/x-www-form-urlencoded" if form
+                                   else "application/json")
+    else:
+        payload = None
+    req = Request(url, data=payload, headers=headers, method=method)
+    try:
+        with OPEN.open(req, timeout=timeout) as response:
+            body = response.read(15_000_000)
+            return response.status, json.loads(body) if body else None
+    except HTTPError as exc:
+        return exc.code, None
+
+
+def expect(status, wanted, description):
+    if status != wanted:
+        raise RuntimeError(f"{description}: HTTP {status}, expected {wanted}")
+
+
+def read_private_env():
+    values = {}
+    for line in (LIVE / "runtime/private.env").read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, raw = line.split("=", 1)
+        words = shlex.split(raw)
+        values[name] = words[0] if words else ""
+    return values
+
+
+def unused_local_port():
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def decode_mcp(result):
+    blocks = result.get("content", [])
+    decoded = []
+    for item in blocks:
+        if item.get("type") == "text":
+            try:
+                decoded.append(json.loads(item["text"]))
+            except ValueError:
+                decoded.append({"text": item["text"]})
+    return decoded[0] if len(decoded) == 1 else decoded
+
+
+def mcp_call(port, jwt_token, name, args=None):
+    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                          "params": {"name": name, "arguments": args or {},
+                                     "_meta": META}}).encode()
+    headers = dict(MCP_HEADERS)
+    if jwt_token:
+        headers["Authorization"] = "Bearer " + jwt_token
+    headers["Mcp-Method"] = "tools/call"
+    headers["Mcp-Name"] = name
+    req = Request(f"http://127.0.0.1:{port}/hackbrowser/mcp",
+                  payload, headers, method="POST")
+    try:
+        with OPEN.open(req, timeout=60) as response:
+            code = response.status
+            raw = response.read(15_000_000).decode()
+    except HTTPError as exc:
+        return exc.code, None, None
+    if raw.lstrip().startswith(("event:", "data:")):
+        raw = next(line[5:].strip() for line in raw.splitlines()
+                   if line.startswith("data:"))
+    obj = json.loads(raw)
+    if "error" in obj:
+        return code, {"isError": True}, obj["error"]
+    result = obj.get("result", {})
+    return code, result, decode_mcp(result)
+
+
+def good(port, token, name, args=None):
+    status, response, value = mcp_call(port, token, name, args)
+    if status != 200 or not isinstance(response, dict) or response.get("isError"):
+        raise RuntimeError(f"{name} failed (HTTP {status}); no tokens logged")
+    return response, value
+
+
+def flatten_tabs(value):
+    if isinstance(value, dict) and "result" in value:
+        value = value["result"]
+    if isinstance(value, dict) and "target_id" in value:
+        value = [value]
+    if not isinstance(value, list) or not value:
+        raise RuntimeError("No browser tab returned by staging OAuth gateway")
+    return value
+
+
+def main():
+    if os.geteuid() != 0:
+        raise SystemExit("Run with sudo: root access is needed only to read Keycloak admin credentials")
+    caller = os.environ.get("SUDO_USER")
+    if not caller or caller == "root":
+        raise SystemExit("Use sudo from an ordinary OCI account, not a root login")
+    account = pwd.getpwnam(caller)
+    env = read_private_env()
+    public = env["PUBLIC_BASE_URL"].rstrip("/")
+    keycloak = f"http://127.0.0.1:8081/auth"
+    resource = f"{public}/hackbrowser/mcp"
+    prefix = "hb-smoke-" + secrets.token_hex(6)
+    client_id = prefix
+    client_secret = secrets.token_urlsafe(32)
+    user_passwords = [secrets.token_urlsafe(28) for _ in range(3)]
+    users = [f"{prefix}-{suffix}" for suffix in ("alice", "bob", "charlie")]
+    created_users = []
+    client_uuid = None
+    stage_process = None
+    stage_root = None
+
+    if not (SOURCE / "services/hackbrowser/server.py").is_file():
+        raise RuntimeError("Run from the HackBrowser PR branch checkout")
+    for path in (LIVE / "runtime/venv-gateway/bin/python",
+                 LIVE / "runtime/venv-hackbrowser/bin/python"):
+        if not path.exists():
+            raise RuntimeError(f"Missing service interpreter: {path}")
+    chrome = next((path for name in ("google-chrome-stable", "chromium", "google-chrome")
+                   if (path := shutil.which(name))), None)
+    if not chrome:
+        raise RuntimeError("Chromium executable not found")
+    gateway_port = unused_local_port()
+    print("[INFO] Staging on loopback only; production ports remain untouched", flush=True)
+
+    status, token_response = request(
+        keycloak + "/realms/master/protocol/openid-connect/token",
+        "POST", {"client_id": "admin-cli", "grant_type": "password",
+                 "username": "mcpadmin",
+                 "password": env["KEYCLOAK_ADMIN_PASSWORD"]}, form=True)
+    expect(status, 200, "Keycloak admin authentication")
+    admin_token = token_response["access_token"]
+    realm_api = keycloak + "/admin/realms/" + REALM
+
+    def admin(path, method="GET", data=None):
+        return request(realm_api + path, method, data, token=admin_token)
+
+    try:
+        status, scopes = admin("/client-scopes")
+        expect(status, 200, "Scope lookup")
+        scope = next((s for s in scopes if s.get("name") == "mcp:hackbrowser"), None)
+        if scope is None:
+            raise RuntimeError("Existing mcp:hackbrowser scope was not found")
+
+        # No edits to the active ChatGPT OAuth client or existing users.
+        status, _ = admin("/clients", "POST", {
+            "clientId": client_id, "secret": client_secret, "enabled": True,
+            "protocol": "openid-connect", "publicClient": False,
+            "standardFlowEnabled": False, "implicitFlowEnabled": False,
+            "directAccessGrantsEnabled": True, "serviceAccountsEnabled": False,
+        })
+        expect(status, 201, "Create temporary OAuth test client")
+        status, found = admin("/clients?clientId=" + quote(client_id))
+        expect(status, 200, "Find temporary OAuth client")
+        match = next((c for c in found if c.get("clientId") == client_id), None)
+        if not match:
+            raise RuntimeError("Temporary client not discoverable for cleanup")
+        client_uuid = match["id"]
+
+        status, _ = admin(f"/clients/{client_uuid}/protocol-mappers/models", "POST", {
+            "name": "smoke-resource-audience", "protocol": "openid-connect",
+            "protocolMapper": "oidc-audience-mapper",
+            "consentRequired": False,
+            "config": {"id.token.claim": "false",
+                       "access.token.claim": "true",
+                       "included.custom.audience": resource},
+        })
+        expect(status, 201, "Create test client audience mapper")
+        status, _ = admin(
+            f"/clients/{client_uuid}/default-client-scopes/{scope['id']}",
+            "PUT", {})
+        expect(status, 204, "Assign existing MCP client scope")
+
+        tokens = []
+        for user, password in zip(users, user_passwords):
+            status, _ = admin("/users", "POST", {
+                "username": user, "enabled": True, "emailVerified": True,
+                "credentials": [{"type": "password", "value": password,
+                                 "temporary": False}],
+            })
+            expect(status, 201, "Create temporary user")
+            status, found = admin("/users?username=" + quote(user) + "&exact=true")
+            expect(status, 200, "Find temporary user")
+            match = next((x for x in found if x.get("username") == user), None)
+            if not match:
+                raise RuntimeError("Temporary user not discoverable for cleanup")
+            created_users.append(match["id"])
+            status, value = request(
+                keycloak + f"/realms/{REALM}/protocol/openid-connect/token",
+                "POST", {"client_id": client_id, "client_secret": client_secret,
+                         "grant_type": "password", "username": user,
+                         "password": password}, form=True)
+            expect(status, 200, "Issue real user JWT")
+            tokens.append(value["access_token"])
+        print("[PASS] Three real Keycloak JWTs issued to distinct temporary accounts",
+              flush=True)
+
+        # Ensure an independent runtime root and a non-root staging gateway.
+        stage_root = Path(tempfile.mkdtemp(prefix="hb-oauth-stage-"))
+        for rel in ("services", "runtime", "runtime/isolated-browser-profiles"):
+            (stage_root / rel).mkdir(parents=True, exist_ok=True)
+        (stage_root / "services/hackbrowser").symlink_to(
+            SOURCE / "services/hackbrowser", target_is_directory=True)
+        (stage_root / "services/gateway").symlink_to(
+            SOURCE / "services/gateway", target_is_directory=True)
+        (stage_root / "runtime/venv-hackbrowser").symlink_to(
+            LIVE / "runtime/venv-hackbrowser", target_is_directory=True)
+        for rel in ("", "services", "runtime", "runtime/isolated-browser-profiles"):
+            os.chown(stage_root / rel, account.pw_uid, account.pw_gid)
+        os.chmod(stage_root / "runtime/isolated-browser-profiles", 0o700)
+
+        stage_env = os.environ.copy()
+        stage_env.update({
+            "HOME": account.pw_dir, "MCP_INSTALL_ROOT": str(stage_root),
+            "PUBLIC_BASE_URL": public, "ENABLE_OAUTH": "1",
+            "BROWSER_SESSION_MODE": "isolated",
+            "BROWSER_MAX_SESSIONS": "2",
+            "BROWSER_IDLE_SECONDS": "600",
+            "OAUTH_GATEWAY_PORT": str(gateway_port),
+            "HACKBROWSER_STAGING_TEST_CLIENT": client_id,
+            "CHROMIUM_BIN": chrome,
+        })
+        stage_process = subprocess.Popen(
+            [str(LIVE / "runtime/venv-gateway/bin/python"),
+             str(SOURCE / "services/gateway/oauth_gateway.py")],
+            cwd=stage_root, env=stage_env, user=account.pw_uid,
+            group=account.pw_gid, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if stage_process.poll() is not None:
+                raise RuntimeError("Staging OAuth gateway exited before health check")
+            status, _ = request(
+                f"http://127.0.0.1:{gateway_port}/internal-health", timeout=2)
+            if status == 200:
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Staging OAuth gateway startup timed out")
+
+        # Every request passes through actual JWT validation and routing.
+        status, _, _ = mcp_call(gateway_port, None, "browser_status")
+        expect(status, 401, "Reject missing JWT")
+        status, _, _ = mcp_call(gateway_port, "not-a-jwt", "browser_status")
+        expect(status, 401, "Reject invalid JWT")
+        print("[PASS] Missing and invalid JWTs denied", flush=True)
+
+        _, first = good(gateway_port, tokens[0], "browser_status")
+        _, second = good(gateway_port, tokens[1], "browser_status")
+        if not (isinstance(first, dict) and isinstance(second, dict)
+                and first["connected"] and second["connected"]
+                and first["cdp"] != second["cdp"]):
+            raise AssertionError("Different JWT subjects did not receive different Chromium")
+        print("[PASS] Real Keycloak subjects routed to different Chromium endpoints", flush=True)
+
+        _, tabs_a = good(gateway_port, tokens[0], "browser_tabs")
+        _, tabs_b = good(gateway_port, tokens[1], "browser_tabs")
+        a_target = flatten_tabs(tabs_a)[0]["target_id"]
+        b_target = flatten_tabs(tabs_b)[0]["target_id"]
+        if a_target == b_target:
+            raise AssertionError("Different JWT users shared a browser target")
+        _, result = good(gateway_port, tokens[0], "browser_handoff_begin",
+                         {"target_id": a_target})
+        control_token = result["control_token"]
+        try:
+            status, response, _ = mcp_call(
+                gateway_port, tokens[1], "browser_handoff_end",
+                {"control_token": control_token})
+            if status != 200 or not response.get("isError"):
+                raise AssertionError("Other user's handoff token was accepted")
+            status, response, _ = mcp_call(
+                gateway_port, tokens[1], "browser_page_text",
+                {"target_id": a_target})
+            if status != 200 or not response.get("isError"):
+                raise AssertionError("Other user's target ID was accepted")
+        finally:
+            good(gateway_port, tokens[0], "browser_handoff_end",
+                 {"control_token": control_token})
+        print("[PASS] Cross-user target ID and handoff token refused via OAuth", flush=True)
+
+        status, _, _ = mcp_call(gateway_port, tokens[2], "browser_status")
+        expect(status, 503, "Third account capacity limit")
+        print("[PASS] Third valid Keycloak account denied at session capacity", flush=True)
+        print("[RESULT] OAuth two-user isolation staging smoke PASSED", flush=True)
+
+    finally:
+        if stage_process is not None:
+            if stage_process.poll() is None:
+                os.killpg(stage_process.pid, signal.SIGTERM)
+                try:
+                    stage_process.wait(timeout=12)
+                except subprocess.TimeoutExpired:
+                    os.killpg(stage_process.pid, signal.SIGKILL)
+                    stage_process.wait()
+        if stage_root is not None:
+            shutil.rmtree(stage_root, ignore_errors=False)
+        for user_uuid in reversed(created_users):
+            try:
+                status, _ = admin("/users/" + quote(user_uuid), "DELETE")
+                if status != 204:
+                    print("[WARN] Test user cleanup failed (HTTP status)", file=sys.stderr)
+            except (OSError, RuntimeError):
+                print("[WARN] Test user cleanup failed", file=sys.stderr)
+        if client_uuid:
+            try:
+                status, _ = admin("/clients/" + quote(client_uuid), "DELETE")
+                if status != 204:
+                    print("[WARN] Test client cleanup failed (HTTP status)", file=sys.stderr)
+            except (OSError, RuntimeError):
+                print("[WARN] Test client cleanup failed", file=sys.stderr)
+        print("[INFO] Staging runtime removed and temporary Keycloak entities cleanup attempted",
+              flush=True)
+
+
+if __name__ == "__main__":
+    main()
