@@ -255,6 +255,40 @@ def main():
     def admin(path, method="GET", data=None):
         return request(realm_api + path, method, data, token=admin_token)
 
+    if "--verify-cleanup" in sys.argv:
+        if sys.argv[1:] != ["--verify-cleanup"]:
+            raise SystemExit("Only --verify-cleanup is supported")
+        # Read-only review: never delete other accounts, clients, or profiles.
+        counts = {}
+        for kind, field in (("users", "username"), ("clients", "clientId")):
+            first = 0
+            matches = 0
+            while first < 10000:
+                status, items = admin(f"/{kind}?first={first}&max=100")
+                expect(status, 200, f"List Keycloak {kind}")
+                if not isinstance(items, list):
+                    raise RuntimeError("Unexpected Keycloak listing response")
+                matches += sum(
+                    1 for item in items
+                    if isinstance(item, dict)
+                    and str(item.get(field, "")).startswith("hb-smoke-")
+                )
+                if len(items) < 100:
+                    break
+                first += len(items)
+            else:
+                raise RuntimeError("Keycloak listing exceeded safety page limit")
+            counts[kind] = matches
+        print("[INFO] Read-only Keycloak check; no credentials or tokens shown")
+        for kind in ("users", "clients"):
+            print(f"[INFO] Residual hb-smoke {kind}: {counts[kind]}")
+        if any(counts.values()):
+            raise SystemExit("[WARN] Temporary Keycloak identities remain; review before merging")
+        print("[PASS] No hb-smoke Keycloak users or clients remain")
+        return
+    if len(sys.argv) != 1:
+        raise SystemExit("Usage: smoke_oauth_isolation.py [--verify-cleanup]")
+
     try:
         status, scopes = admin("/client-scopes")
         expect(status, 200, "Scope lookup")
