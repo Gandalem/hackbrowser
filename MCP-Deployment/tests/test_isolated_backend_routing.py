@@ -94,6 +94,33 @@ class IsolatedRoutingTests(unittest.TestCase):
                 manager.release(key2)
                 manager.shutdown()
 
+    def test_lifecycle_cookie_fixture_uses_persistent_cookie(self):
+        import importlib.util
+        import threading
+        from http.server import ThreadingHTTPServer
+        from urllib.request import ProxyHandler, build_opener
+
+        script = SERVICES.parent / "scripts" / "smoke_session_lifecycle.py"
+        spec = importlib.util.spec_from_file_location("lifecycle_smoke_fixture", script)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), module.CookieSite)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            opener = build_opener(ProxyHandler({}))
+            port = server.server_address[1]
+            with opener.open(f"http://127.0.0.1:{port}/set", timeout=3) as response:
+                cookie = response.headers.get("Set-Cookie", "")
+                self.assertIn("lifecycle=retained", cookie)
+                self.assertIn("Max-Age=3600", cookie)
+            with opener.open(f"http://127.0.0.1:{port}/read", timeout=3) as response:
+                self.assertEqual(response.read().decode(), "cookie-missing")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=3)
+
     def test_smoke_browser_tabs_decoding(self):
         import importlib.util
         script = SERVICES.parent / "scripts" / "smoke_isolated_browser.py"
