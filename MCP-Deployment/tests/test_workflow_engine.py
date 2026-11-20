@@ -161,6 +161,21 @@ class ServerAdapterTests(unittest.TestCase):
         }), mock.patch.object(server, "_verification_state", return_value={}):
             self.assertEqual(server._workflow_gate("tab")["state"], "login_required")
 
+    def test_navigation_waits_for_actual_page_url(self):
+        target = {"id": "tab", "url": "https://example.org/old"}
+        with mock.patch.object(server, "_target", return_value=target), \
+             mock.patch.object(server, "browser_navigate", return_value={
+                 "navigation_started": True,
+             }), mock.patch.object(server, "browser_page_text", side_effect=[
+                 {"url": "https://example.org/old"},
+                 {"url": "https://example.org/new"},
+             ]), mock.patch.object(server.time, "sleep"):
+            result = server._workflow_execute("tab", {
+                "op": "navigate", "url": "https://example.org/new",
+            })
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["observed_url"], "https://example.org/new")
+
     def test_guarded_link_uses_playwright_operation(self):
         with mock.patch.object(server, "_target", return_value={
             "id": "tab", "url": "https://example.org/",
