@@ -1,0 +1,25 @@
+# LOCAL DEVELOPMENT ONLY: this MCP has no OAuth/authentication.
+# The only published port binds to 127.0.0.1 on the Docker host.
+services:
+  hackbrowser:
+    build:
+      context: ..
+      dockerfile: standalone/Dockerfile
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:8765:8765"
+    shm_size: "512m"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HACKBROWSER_MCP_HOST: 0.0.0.0
+      HACKBROWSER_MCP_PORT: "8765"
+    volumes:
+      - browser-profile:/home/mcp/.local/share/hackbrowser-mcp
+    tmpfs:
+      - /tmp:rw,nosuid,size=512m
+volumes:
+  browser-profile:
