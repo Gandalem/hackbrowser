@@ -44,10 +44,44 @@ class AgentActionsTests(unittest.TestCase):
         expression = evaluate.call_args.args[0]
         self.assertIn('document.querySelector("#results")', expression)
         self.assertIn("top:-120", expression)
+        self.assertIn("behavior:'instant'", expression)
+        self.assertIn("setTimeout", expression)
+        self.assertTrue(evaluate.call_args.kwargs["await_promise"])
         for options in ({"direction": "diagonal"}, {"pixels": 0}, {"pixels": 9000},
                         {"selector": ""}):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 server.browser_scroll(**options)
+
+    def test_scroll_returns_committed_positions_and_boundary(self):
+        actual = {"ok": True, "before": {"top": 0, "left": 0},
+                  "after": {"top": 650, "left": 0},
+                  "moved": True, "at_boundary": False}
+        with mock.patch.object(server, "_target", return_value=TARGET), \
+             mock.patch.object(server, "_pace_navigation"), \
+             mock.patch.object(server, "_evaluate", return_value=actual) as evaluate:
+            self.assertEqual(server.browser_scroll(direction="down", pixels=650), actual)
+        self.assertTrue(evaluate.call_args.kwargs["await_promise"])
+        boundary = {"ok": True, "before": {"top": 100, "left": 0},
+                    "after": {"top": 100, "left": 0},
+                    "moved": False, "at_boundary": True}
+        with mock.patch.object(server, "_target", return_value=TARGET), \
+             mock.patch.object(server, "_pace_navigation"), \
+             mock.patch.object(server, "_evaluate", return_value=boundary):
+            self.assertEqual(server.browser_scroll(direction="down", pixels=650), boundary)
+
+    def test_evaluate_awaits_promise_only_when_requested(self):
+        with mock.patch.object(server, "_cdp", return_value={
+            "result": {"type": "object", "value": {"ok": True}}
+        }) as cdp:
+            result = server._evaluate("Promise.resolve({ok:true})", "tab-test",
+                                      await_promise=True)
+        self.assertTrue(result["ok"])
+        self.assertTrue(cdp.call_args.args[1]["awaitPromise"])
+        with mock.patch.object(server, "_cdp", return_value={
+            "result": {"value": "hello"}
+        }) as cdp:
+            self.assertEqual(server._evaluate("'hello'", "tab-test"), "hello")
+        self.assertNotIn("awaitPromise", cdp.call_args.args[1])
 
     def test_wait_for_selector_and_dynamic_page(self):
         calls = [
