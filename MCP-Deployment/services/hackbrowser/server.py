@@ -120,12 +120,12 @@ def _cdp(method: str, params: dict | None = None, target_id: str | None = None) 
             conn.close()
 
 
-def _evaluate(expression: str, target_id: str | None = None):
-    response = _cdp(
-        "Runtime.evaluate",
-        {"expression": expression, "returnByValue": True},
-        target_id,
-    )
+def _evaluate(expression: str, target_id: str | None = None,
+              await_promise: bool = False):
+    parameters = {"expression": expression, "returnByValue": True}
+    if await_promise:
+        parameters["awaitPromise"] = True
+    response = _cdp("Runtime.evaluate", parameters, target_id)
     if response.get("exceptionDetails"):
         details = response["exceptionDetails"]
         raise RuntimeError(f"Browser JavaScript error: {details.get('text', 'unknown')}")
@@ -425,12 +425,22 @@ def browser_scroll(direction: str = "down", pixels: int = 600,
     amount = pixels if direction in {"down", "right"} else -pixels
     expression = """(function(){
       var el=%s ? document.querySelector(%s) : document.scrollingElement;
-      if(!el)return {ok:false,error:'Scrollable element not found'};
+      if(!el)return Promise.resolve({ok:false,error:'Scrollable element not found'});
       var before={top:el.scrollTop,left:el.scrollLeft};
-      el.scrollBy({%s:%d,behavior:'auto'});
-      return {ok:true,before:before,after:{top:el.scrollTop,left:el.scrollLeft}};
+      // Explicit instant scrolling avoids CSS scroll-behavior:smooth delaying
+      // movement. Read the final coordinates on a later task, not immediately
+      // after scrollBy, because Chromium may commit scrolling asynchronously.
+      el.scrollBy({%s:%d,behavior:'instant'});
+      return new Promise(function(resolve){
+        setTimeout(function(){
+          var after={top:el.scrollTop,left:el.scrollLeft};
+          var moved=after.top!==before.top || after.left!==before.left;
+          resolve({ok:true,before:before,after:after,moved:moved,
+                   at_boundary:!moved});
+        },90);
+      });
     })()""" % (json.dumps(selector is not None), json.dumps(selector), axis, amount)
-    result = _evaluate(expression, target["id"])
+    result = _evaluate(expression, target["id"], await_promise=True)
     return result if isinstance(result, dict) else {"result": result}
 
 
