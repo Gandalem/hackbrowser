@@ -17,7 +17,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parents[1] / "hackbrowser"
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
-from session_pool import SessionPool
+from session_pool import SessionPool  # noqa: E402 - local service path added explicitly
 
 
 class IsolatedBackends:
