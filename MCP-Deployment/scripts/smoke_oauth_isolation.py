@@ -91,12 +91,46 @@ def request(url, method="GET", data=None, token=None, form=False, timeout=25):
             except ValueError:
                 return response.status, body.decode(errors="replace")
     except HTTPError as exc:
+        # Never print raw Keycloak token errors: some versions may echo
+        # user-supplied credentials in error_description.
+        try:
+            error = json.loads(exc.read(8192))
+        except (ValueError, UnicodeDecodeError):
+            error = None
+        if isinstance(error, dict):
+            code = error.get("error")
+            description = error.get("error_description")
+            safe_codes = {"invalid_grant", "invalid_client", "unauthorized_client",
+                          "invalid_request", "access_denied"}
+            reason_map = {
+                "Account is not fully set up": "incomplete_profile_or_required_action",
+                "Invalid user credentials": "invalid_user_credentials",
+                "Client not allowed for direct access grants": "direct_grant_disabled",
+                "Invalid client credentials": "invalid_client_credentials",
+            }
+            return exc.code, {
+                "error": code if code in safe_codes else "unclassified",
+                "reason": reason_map.get(description, "unspecified"),
+            }
         return exc.code, None
 
 
-def expect(status, wanted, description):
+def expect(status, wanted, description, details=None):
     if status != wanted:
-        raise RuntimeError(f"{description}: HTTP {status}, expected {wanted}")
+        safe_detail = ""
+        if isinstance(details, dict):
+            code = details.get("error")
+            reason = details.get("reason")
+            if code in {"invalid_grant", "invalid_client", "unauthorized_client",
+                        "invalid_request", "access_denied"}:
+                safe_detail = f"; Keycloak error={code}"
+            if reason in {"incomplete_profile_or_required_action",
+                          "invalid_user_credentials", "direct_grant_disabled",
+                          "invalid_client_credentials"}:
+                safe_detail += f"; reason={reason}"
+        raise RuntimeError(
+            f"{description}: HTTP {status}, expected {wanted}{safe_detail}"
+        )
 
 
 def read_private_env():
@@ -259,10 +293,16 @@ def main():
 
         tokens = []
         for user, password in zip(users, user_passwords):
+            # Keycloak 26 user-profile checks can deny direct grants even
+            # when requiredActions is empty if names/email are missing.
             status, _ = admin("/users", "POST", {
-                "username": user, "enabled": True, "emailVerified": True,
-                "credentials": [{"type": "password", "value": password,
-                                 "temporary": False}],
+                "username": user,
+                "firstName": "Isolation",
+                "lastName": "Smoke",
+                "email": user + "@example.invalid",
+                "enabled": True,
+                "emailVerified": True,
+                "requiredActions": [],
             })
             expect(status, 201, "Create temporary user")
             status, found = admin("/users?username=" + quote(user) + "&exact=true")
@@ -271,12 +311,27 @@ def main():
             if not match:
                 raise RuntimeError("Temporary user not discoverable for cleanup")
             created_users.append(match["id"])
+            status, _ = admin(
+                "/users/" + quote(match["id"]) + "/reset-password",
+                "PUT", {"type": "password", "value": password, "temporary": False},
+            )
+            expect(status, 204, "Set permanent password for disposable user")
+            status, user_profile = admin("/users/" + quote(match["id"]))
+            expect(status, 200, "Read disposable user profile")
+            actions = user_profile.get("requiredActions") or []
+            if actions:
+                # Do not override the realm's required MFA or ToS policy.
+                raise RuntimeError(
+                    "Disposable account has required actions; direct grant "
+                    + "cannot proceed under this realm policy: "
+                    + ",".join(sorted(str(a)[:40] for a in actions))
+                )
             status, value = request(
                 keycloak + f"/realms/{REALM}/protocol/openid-connect/token",
                 "POST", {"client_id": client_id, "client_secret": client_secret,
                          "grant_type": "password", "username": user,
                          "password": password}, form=True)
-            expect(status, 200, "Issue real user JWT")
+            expect(status, 200, "Issue real user JWT", value)
             tokens.append(value["access_token"])
         print("[PASS] Three real Keycloak JWTs issued to distinct temporary accounts",
               flush=True)
