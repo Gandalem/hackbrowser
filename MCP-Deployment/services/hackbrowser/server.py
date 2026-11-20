@@ -9,7 +9,6 @@ import base64
 import binascii
 import json
 import os
-import re
 import secrets
 import time
 from pathlib import Path
@@ -30,7 +29,6 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 SCREENSHOT_UI_URI = "ui://hackbrowser/screenshot.html"
-SCREENSHOT_UI_MIME = "text/html;profile=mcp-app"
 
 apps = Apps()
 apps.add_html_resource(
