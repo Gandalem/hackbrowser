@@ -75,7 +75,7 @@ class ScreenshotTests(unittest.TestCase):
         self.assertIn('ui://hackbrowser/screenshot.html', server)
         html = SERVER.with_name("screenshot_widget.html").read_text(encoding="utf-8")
         self.assertIn("ui/initialize", html)
-        self.assertEqual(browser.SCREENSHOT_UI_MIME, "text/html;profile=mcp-app")
+        # MIME is verified over the real MCP resources/read protocol in test_mcp_app_protocol.py.
         self.assertIn("ui/notifications/tool-result", html)
         self.assertIn("ui/notifications/size-changed", html)
         self.assertIn("ResizeObserver", html)
