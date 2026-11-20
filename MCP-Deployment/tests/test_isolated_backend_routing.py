@@ -1,6 +1,7 @@
 """Regression tests for isolated bridge routing without launching Chromium."""
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -57,6 +58,38 @@ class IsolatedRoutingTests(unittest.TestCase):
                 manager.release(key_b)
                 manager.shutdown()
                 self.assertFalse(manager.bridges)
+
+    def test_active_stream_lease_prevents_idle_reap_and_idle_reconnect(self):
+        # acquire() owns a lease until release(); a stream keeps it open.
+        with tempfile.TemporaryDirectory() as root:
+            manager = IsolatedBackends(Path(root), max_sessions=1, idle_seconds=1)
+            with patch("subprocess.Popen", side_effect=FakeProcess), \
+                 patch("session_pool.os.killpg"), \
+                 patch.object(SessionPool, "_ready", return_value=True), \
+                 patch.object(SessionPool, "_port_available", return_value=True), \
+                 patch.object(manager, "_reachable",
+                              side_effect=[False, True, False, True]):
+                url, key = manager.acquire("issuer:alice")
+                first = manager.pool._sessions[key]
+                first.last_used = time.monotonic() - 60
+                manager.reap()
+                self.assertIn(key, manager.pool._sessions)
+                self.assertIs(manager.pool._sessions[key], first)
+                self.assertIn(key, manager.bridges)
+                manager.release(key)
+                first.last_used = time.monotonic() - 60
+                manager.reap()
+                self.assertNotIn(key, manager.pool._sessions)
+                self.assertNotIn(key, manager.bridges)
+                self.assertTrue(first.profile_dir.exists())
+                url2, key2 = manager.acquire("issuer:alice")
+                self.assertEqual(key, key2)
+                self.assertEqual(url, url2)
+                self.assertEqual(manager.pool._sessions[key].profile_dir,
+                                 first.profile_dir)
+                self.assertIsNot(manager.pool._sessions[key].process, first.process)
+                manager.release(key2)
+                manager.shutdown()
 
     def test_smoke_browser_tabs_decoding(self):
         import importlib.util
