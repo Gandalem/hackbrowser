@@ -1026,7 +1026,9 @@ def browser_screenshot(target_id: str | None = None) -> list[TextContent | Image
         raise RuntimeError("Screenshot exceeds the 8 MiB limit")
 
     metadata = {"bytes": len(png), "mime_type": "image/png"}
-    metadata["handoff"] = _manual_handoff.status()
+    active_handoff = _manual_handoff.status()
+    if active_handoff["active"]:
+        metadata["handoff"] = active_handoff
     # Only render the manual-entry UI when the actual open tab shows a
     # recognized verification prompt. Never infer the answer or bypass it.
     try:
