@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install and verify Hangul-capable fonts for the unprivileged headless Chromium.
+# Install and verify Hangul-capable fonts for the unprivileged GUI Chromium.
 set -Eeuo pipefail
 
 mode="${1:-install}"
@@ -56,4 +56,4 @@ if [[ -z "$matched_family" ]]; then
   echo "[FAIL] Fontconfig did not select a Korean fallback font" >&2
   exit 1
 fi
-echo "[PASS] Headless Chromium Korean fonts available: ${matched_family%%,*}"
+echo "[PASS] GUI Chromium Korean fonts available: ${matched_family%%,*}"
