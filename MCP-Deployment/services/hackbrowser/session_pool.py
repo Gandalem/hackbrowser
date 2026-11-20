@@ -15,7 +15,10 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
+
+import websocket
 
 
 @dataclass
@@ -69,23 +72,67 @@ class SessionPool:
         except (OSError, ValueError, TimeoutError):
             return False
 
+    def _request_browser_close(self, session: BrowserSession) -> bool:
+        """Ask *this pool's* localhost Chromium to flush state and exit.
+
+        CDP Browser.close is preferable to SIGTERM for a persistent profile.
+        Never use arbitrary browser-supplied hosts or ports.
+        """
+        port = session.port
+        if not self.port_start <= port <= self.port_end:
+            return False
+        try:
+            with self._opener.open(
+                Request(f"http://127.0.0.1:{port}/json/version"),
+                timeout=1,
+            ) as response:
+                info = json.load(response)
+            ws_url = info.get("webSocketDebuggerUrl") if isinstance(info, dict) else None
+            if not isinstance(ws_url, str):
+                return False
+            parsed = urlsplit(ws_url)
+            if (parsed.scheme != "ws"
+                    or parsed.hostname not in {"127.0.0.1", "localhost"}
+                    or parsed.port != port
+                    or not parsed.path.startswith("/devtools/browser/")
+                    or parsed.username or parsed.password):
+                return False
+            ws = websocket.create_connection(
+                ws_url, timeout=2, suppress_origin=True,
+            )
+            try:
+                ws.send(json.dumps({"id": 1, "method": "Browser.close"}))
+                # Chromium may close the WebSocket before returning a response.
+                return True
+            finally:
+                ws.close()
+        except (OSError, ValueError, TimeoutError, websocket.WebSocketException):
+            return False
+
     def _stop(self, key: str) -> None:
         session = self._sessions.pop(key, None)
         if session is None:
             return
         if session.process.poll() is None:
-            try:
-                os.killpg(session.process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                session.process.wait(timeout=4)
-            except subprocess.TimeoutExpired:
+            if self._request_browser_close(session):
                 try:
-                    os.killpg(session.process.pid, signal.SIGKILL)
+                    # Give Chromium time to flush its persistent cookie DB.
+                    session.process.wait(timeout=8)
+                except subprocess.TimeoutExpired:
+                    pass
+            if session.process.poll() is None:
+                try:
+                    os.killpg(session.process.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
-                session.process.wait(timeout=3)
+                try:
+                    session.process.wait(timeout=4)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(session.process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    session.process.wait(timeout=3)
         # Profiles persist across idle shutdown; never erase login data here.
 
     def reap(self) -> int:
