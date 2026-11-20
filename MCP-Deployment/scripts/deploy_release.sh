@@ -27,6 +27,10 @@ done
 if ! cmp -s "$SOURCE/services/hackbrowser/requirements.txt" "$ROOT/services/hackbrowser/requirements.txt"; then
   echo "Python dependencies changed: installer review required" >&2; exit 1
 fi
+# This release adds an MCP Apps UI. Verify SDK support before touching live
+# source or restarting systemd; fail safely if an older venv lacks the module.
+"$ROOT/runtime/venv-hackbrowser/bin/python" -c "from mcp.server.apps import Apps"
+
 BACKUP="$(mktemp -d /opt/mcp-deployment-rollback.XXXXXX)"
 for item in services scripts templates docs docker-compose.yml status.sh install.sh; do
   [[ ! -e "$ROOT/$item" ]] || cp -a "$ROOT/$item" "$BACKUP/"
