@@ -62,7 +62,6 @@ try:
         raise RuntimeError("MCP screenshot metadata mismatch")
     if "download_url" in metadata or "saved_path" in metadata:
         raise RuntimeError("Legacy server screenshot download metadata must not be returned")
-    from urllib.parse import urlsplit
     from urllib.request import urlopen
     # Caddy must no longer expose any public screenshot endpoint.
     caddy_config = (ROOT / "runtime/caddy/Caddyfile").read_text()
@@ -70,7 +69,7 @@ try:
         raise RuntimeError("Legacy public screenshot path is still exposed")
     from urllib.error import HTTPError
     try:
-        with urlopen("http://127.0.0.1:8088/captures/deprecated.png", timeout=5) as unused:
+        with urlopen("http://127.0.0.1:8790/captures/deprecated.png", timeout=5) as unused:
             raise RuntimeError(f"Legacy screenshot endpoint unexpectedly returned {unused.status}")
     except HTTPError as response:
         if response.code not in (403, 404):
