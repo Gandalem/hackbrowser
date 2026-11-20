@@ -53,6 +53,45 @@ class PoolTests(unittest.TestCase):
                 pool.shutdown()
                 self.assertEqual(pool.stats()["active"], 0)
 
+    def test_graceful_browser_close_precedes_process_group_termination(self):
+        with tempfile.TemporaryDirectory() as root:
+            pool = SessionPool(root)
+            process = FakeProcess()
+            with patch("session_pool.subprocess.Popen", return_value=process), \
+                 patch.object(pool, "_ready", return_value=True), \
+                 patch.object(pool, "_port_available", return_value=True), \
+                 patch.object(pool, "_request_browser_close", return_value=True) as close, \
+                 patch("session_pool.os.killpg") as kill:
+                session = pool.acquire("alice")
+                # FakeProcess does not implement the real Browser.close shutdown:
+                # the timeout fallback still must terminate the process group.
+                pool.release("alice")
+                close.assert_called_once_with(session)
+                kill.assert_called()
+                self.assertTrue(process.exited)
+
+    def test_browser_close_rejects_untrusted_websocket_endpoint(self):
+        import io
+        from unittest.mock import MagicMock
+
+        with tempfile.TemporaryDirectory() as root:
+            pool = SessionPool(root)
+            process = FakeProcess()
+            with patch("session_pool.subprocess.Popen", return_value=process), \
+                 patch.object(pool, "_ready", return_value=True), \
+                 patch.object(pool, "_port_available", return_value=True), \
+                 patch("session_pool.os.killpg"):
+                session = pool.acquire("alice")
+                fake_response = MagicMock()
+                fake_response.__enter__.return_value = io.StringIO(
+                    '{"webSocketDebuggerUrl":"ws://evil.example/devtools/browser/untrusted"}'
+                )
+                with patch.object(pool._opener, "open", return_value=fake_response), \
+                     patch("session_pool.websocket.create_connection") as connect:
+                    self.assertFalse(pool._request_browser_close(session))
+                    connect.assert_not_called()
+                pool.release("alice")
+
     def test_failed_startup_terminates_child(self):
         with tempfile.TemporaryDirectory() as root:
             pool = SessionPool(root)
