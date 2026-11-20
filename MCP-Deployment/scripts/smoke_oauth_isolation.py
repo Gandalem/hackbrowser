@@ -345,6 +345,44 @@ def main():
         b_target = flatten_tabs(tabs_b)[0]["target_id"]
         if a_target == b_target:
             raise AssertionError("Different JWT users shared a browser target")
+        site = ThreadingHTTPServer(("127.0.0.1", 0), MarkerSite)
+        site_thread = threading.Thread(target=site.serve_forever, daemon=True)
+        site_thread.start()
+        site_url = "http://127.0.0.1:" + str(site.server_address[1])
+        for jwt_token, target, marker in ((tokens[0], a_target, "alice"),
+                                          (tokens[1], b_target, "bob")):
+            good(gateway_port, jwt_token, "browser_navigate",
+                 {"url": site_url + "/" + marker, "target_id": target})
+        for jwt_token, target, marker, other in (
+            (tokens[0], a_target, "ALICE", "BOB"),
+            (tokens[1], b_target, "BOB", "ALICE")
+        ):
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                _, page = good(gateway_port, jwt_token, "browser_page_text",
+                               {"target_id": target})
+                if isinstance(page, dict) and ("testowner=" + marker) in page.get("text", ""):
+                    if ("testowner=" + other) in page["text"]:
+                        raise AssertionError("Cross-user cookie leakage")
+                    break
+                time.sleep(0.25)
+            else:
+                raise AssertionError("Expected user-specific cookie not visible")
+        print("[PASS] Real OAuth users have distinct pages and cookies", flush=True)
+
+        image_digests = []
+        for jwt_token, target in ((tokens[0], a_target), (tokens[1], b_target)):
+            response, _ = good(gateway_port, jwt_token, "browser_screenshot",
+                               {"target_id": target})
+            images = [x["data"] for x in response.get("content", [])
+                      if x.get("type") == "image" and x.get("mimeType") == "image/png"]
+            if len(images) != 1:
+                raise AssertionError("Missing PNG screenshot from OAuth gateway")
+            image_digests.append(hashlib.sha256(images[0].encode()).hexdigest())
+        if image_digests[0] == image_digests[1]:
+            raise AssertionError("OAuth sessions returned identical screenshots")
+        print("[PASS] Distinct PNG screenshots through Keycloak OAuth", flush=True)
+
         _, result = good(gateway_port, tokens[0], "browser_handoff_begin",
                          {"target_id": a_target})
         control_token = result["control_token"]
