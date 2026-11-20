@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import os
 import pwd
@@ -30,6 +31,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import ProxyHandler, Request, build_opener
 
 from keycloak_pkce import authorization_code
+from soak_metrics import sample_tree, available_memory_mib, process_cpu_percent
 
 SOURCE = Path(__file__).resolve().parents[1]
 LIVE = Path("/opt/mcp-deployment")
@@ -258,7 +260,9 @@ def main():
     if not chrome:
         raise RuntimeError("Chromium executable not found")
     gateway_port = unused_local_port()
-    pkce_mode = sys.argv[1:] == ["--pkce"]
+    args = sys.argv[1:]
+    soak_mode = args == ["--pkce", "--soak"]
+    pkce_mode = args == ["--pkce"] or soak_mode
     callback_port = unused_local_port() if pkce_mode else None
     callback_uri = f"http://127.0.0.1:{callback_port}/callback" if pkce_mode else None
     print("[INFO] Staging on loopback only; production ports remain untouched", flush=True)
@@ -307,7 +311,7 @@ def main():
         print("[PASS] No hb-smoke Keycloak users or clients remain")
         return
     if len(sys.argv) != 1 and not pkce_mode:
-        raise SystemExit("Usage: smoke_oauth_isolation.py [--pkce|--verify-cleanup]")
+        raise SystemExit("Usage: smoke_oauth_isolation.py [--pkce [--soak]|--verify-cleanup]")
 
     try:
         status, scopes = admin("/client-scopes")
@@ -573,6 +577,54 @@ def main():
         status, _, _ = mcp_call(gateway_port, tokens[2], "browser_status")
         expect(status, 503, "Third account capacity limit")
         print("[PASS] Third valid Keycloak account denied at session capacity", flush=True)
+
+        if soak_mode:
+            # Keep the real authenticated Chromium/MCP backends busy while
+            # sampling only this disposable staging process tree.
+            # Bounded to 30 seconds: not a production-scale load test.
+            duration = 30
+            print("[INFO] Bounded 30s two-user browser soak; staging only", flush=True)
+            start = time.monotonic()
+            last_time = start
+            prior = sample_tree(stage_process.pid)
+            if prior["processes"] == 0:
+                raise RuntimeError("Staging process tree disappeared during soak")
+            peak_rss = prior["rss_mib"]
+            max_cpu = 0.0
+            minimum_available = available_memory_mib()
+            operations = 0
+            with ThreadPoolExecutor(max_workers=2) as workers:
+                while time.monotonic() - start < duration:
+                    calls = [
+                        workers.submit(good, gateway_port, token,
+                                       "browser_page_text", {"target_id": target})
+                        for token, target in ((tokens[0], a_target),
+                                              (tokens[1], b_target))
+                    ]
+                    for future in calls:
+                        future.result(timeout=65)
+                        operations += 1
+                    now = time.monotonic()
+                    current = sample_tree(stage_process.pid)
+                    if current["processes"] < 1:
+                        raise RuntimeError("Staging gateway stopped during soak")
+                    peak_rss = max(peak_rss, current["rss_mib"])
+                    minimum_available = min(minimum_available, available_memory_mib())
+                    max_cpu = max(max_cpu, process_cpu_percent(
+                        prior["cpu_ticks"], current["cpu_ticks"],
+                        max(now - last_time, 0.001),
+                    ))
+                    prior, last_time = current, now
+                    # Moderate request cadence to avoid overwhelming 3 vCPUs.
+                    time.sleep(0.5)
+            print(f"[PASS] Two-user 30s soak: {operations} authenticated page reads")
+            print("[METRICS] Estimated staging process-tree RSS peak: "
+                  f"{peak_rss:.1f} MiB; CPU peak: {max_cpu:.1f}% "
+                  f"(100%=one core); host MemAvailable minimum: "
+                  f"{minimum_available:.1f} MiB", flush=True)
+            print("[INFO] Per-process RSS sum double-counts shared pages; "
+                  "this is not machine-wide memory consumption", flush=True)
+
         print("[RESULT] " + ("PKCE S256 " if pkce_mode else "")
               + "OAuth two-user isolation staging smoke PASSED", flush=True)
 
